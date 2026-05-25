@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reemisor HLS Local</title>
+    <style>
+        body {
+            background: #111827;
+            color: #f9fafb;
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 32px;
+        }
+
+        main {
+            margin: 0 auto;
+            max-width: 1100px;
+        }
+
+        video {
+            background: #000;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+            width: 100%;
+        }
+
+        a { color: #93c5fd; }
+
+        .links {
+            display: grid;
+            gap: 6px;
+            margin-top: 14px;
+        }
+
+        form {
+            background: #1f2937;
+            border: 1px solid #374151;
+            border-radius: 12px;
+            display: grid;
+            gap: 12px;
+            margin: 24px 0;
+            padding: 18px;
+        }
+
+        label {
+            color: #d1d5db;
+            font-weight: 700;
+        }
+
+        .input-row {
+            display: grid;
+            gap: 12px;
+            grid-template-columns: 1fr auto;
+        }
+
+        input {
+            background: #030712;
+            border: 1px solid #4b5563;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 16px;
+            padding: 12px 14px;
+        }
+
+        button {
+            background: #2563eb;
+            border: 0;
+            border-radius: 8px;
+            color: #fff;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 700;
+            padding: 12px 18px;
+        }
+
+        button:hover { background: #1d4ed8; }
+
+        button:disabled,
+        input:disabled {
+            cursor: not-allowed;
+            opacity: 0.55;
+        }
+
+        .disconnect-form {
+            margin-top: -12px;
+        }
+
+        .danger {
+            background: #dc2626;
+        }
+
+        .danger:hover { background: #b91c1c; }
+
+        .status {
+            color: #d1d5db;
+            margin-top: 16px;
+        }
+
+        .error {
+            background: #7f1d1d;
+            border: 1px solid #ef4444;
+            border-radius: 8px;
+            color: #fee2e2;
+            padding: 12px 14px;
+        }
+
+        .connected {
+            color: #86efac;
+        }
+
+        @media (max-width: 720px) {
+            body { padding: 18px; }
+            .input-row { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <h1>Reemisor HLS Local</h1>
+
+        <form action="/connect" method="post">
+            <label for="url">URL del directo de YouTube</label>
+            <div class="input-row">
+                <input id="url" name="url" type="url" value="{{ source_url }}" placeholder="https://www.youtube.com/live/..." required {% if connected %}disabled{% endif %}>
+                <button type="submit" {% if connected %}disabled{% endif %}>Conectar</button>
+            </div>
+            {% if connected %}
+                <span class="connected">Directo conectado. Para cambiar de URL, pulsa Desconectar y se limpiara la cache de la emision actual.</span>
+            {% endif %}
+            {% if error %}
+                <div class="error">{{ error }}</div>
+            {% endif %}
+        </form>
+
+        {% if connected %}
+            <form class="disconnect-form" action="/disconnect" method="post">
+                <button class="danger" type="submit">Desconectar</button>
+            </form>
+        {% endif %}
+
+        {% if connected %}
+            <video id="video" controls autoplay muted playsinline></video>
+            <p class="status" id="status">Cargando stream local...</p>
+            <div class="links">
+                <span>Playlist adaptativa para Emby: <a href="{{ playlist_url }}">{{ playlist_url }}</a></span>
+                <span>Playlist maxima calidad: <a href="/live-max.m3u8">/live-max.m3u8</a></span>
+                <span>Lista M3U maxima calidad: <a href="/channels-max.m3u">/channels-max.m3u</a></span>
+            </div>
+        {% else %}
+            <p class="status">Introduce la URL del directo y pulsa Conectar para iniciar la reproduccion.</p>
+        {% endif %}
+    </main>
+
+    {% if connected %}
+        <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+        <script>
+            const video = document.getElementById('video');
+            const status = document.getElementById('status');
+            const playbackUrl = '{{ playback_url }}';
+            const isHls = {{ 'true' if is_hls else 'false' }};
+
+            if (!isHls) {
+                video.src = playbackUrl;
+                status.textContent = 'Reproduciendo video directo.';
+                video.play().catch(() => {
+                    status.textContent = 'Pulsa play para iniciar el video.';
+                });
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                video.src = playbackUrl;
+                status.textContent = 'Reproduciendo HLS nativo.';
+            } else if (window.Hls && Hls.isSupported()) {
+                const hls = new Hls({ liveSyncDurationCount: 3 });
+                hls.loadSource(playbackUrl);
+                hls.attachMedia(video);
+                hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                    status.textContent = 'Reproduciendo HLS con hls.js.';
+                    video.play().catch(() => {
+                        status.textContent = 'Pulsa play para iniciar el directo.';
+                    });
+                });
+                hls.on(Hls.Events.ERROR, (_, data) => {
+                    status.textContent = `Error HLS: ${data.details}`;
+                });
+            } else {
+                status.textContent = 'Este navegador no soporta HLS.';
+            }
+        </script>
+    {% endif %}
+</body>
+</html>

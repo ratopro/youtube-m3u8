@@ -1,0 +1,12 @@
+services:
+  youtube-hls:
+    build: .
+    container_name: youtube-hls
+    environment:
+      CACHE_TTL_SECONDS: "1800"
+      CACHE_MAX_MB: "512"
+      CACHE_MAX_OBJECT_MB: "32"
+      LIVE_WINDOW_SEGMENTS: "30"
+    ports:
+      - "5058:5000"
+    restart: unless-stopped
