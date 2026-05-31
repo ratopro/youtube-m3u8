@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fuentes - Parrilla TV</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            background: #111827;
+            color: #f9fafb;
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 24px;
+            font-size: 15px;
+        }
+        main { margin: 0 auto; max-width: 1100px; }
+
+        h1 { font-size: 24px; margin: 0 0 4px; }
+        h2 { font-size: 17px; margin: 0 0 16px; color: #9ca3af; }
+        h3 { font-size: 15px; margin: 0 0 8px; color: #d1d5db; text-transform: uppercase; letter-spacing: 0.5px; }
+
+        .nav { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+
+        .card {
+            background: #1f2937;
+            border: 1px solid #374151;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .btn {
+            background: #374151; border: 1px solid #4b5563; border-radius: 8px;
+            color: #fff; cursor: pointer; font-size: 14px; font-weight: 600;
+            padding: 8px 14px; transition: background 0.15s;
+        }
+        .btn:hover { background: #4b5563; }
+        .btn-primary { background: #2563eb; border-color: #2563eb; }
+        .btn-primary:hover { background: #1d4ed8; }
+        .btn-danger { background: #dc2626; border-color: #dc2626; }
+        .btn-danger:hover { background: #b91c1c; }
+        .btn-success { background: #16a34a; border-color: #16a34a; }
+        .btn-success:hover { background: #15803d; }
+        .btn-sm { padding: 6px 12px; font-size: 13px; }
+
+        .input-row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+        .input-row input, .input-row select {
+            background: #030712; border: 1px solid #4b5563; border-radius: 6px;
+            color: #fff; font-size: 13px; padding: 8px 10px; flex: 1; min-width: 100px;
+        }
+        .input-row input:focus, .input-row select:focus { outline: none; border-color: #2563eb; }
+
+        .iptv-load-area { border: 1px dashed #4b5563; border-radius: 8px; padding: 12px; margin-top: 8px; }
+
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th { color: #9ca3af; text-align: left; padding: 8px 10px; border-bottom: 1px solid #374151; font-weight: 600; }
+        td { padding: 8px 10px; border-bottom: 1px solid #1f2937; vertical-align: middle; }
+        tr:hover td { background: #111827; }
+
+        .source-type { font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: 600; white-space: nowrap; }
+        .source-type.yt { background: #7c3aed; }
+        .source-type.iptv { background: #0891b2; }
+        .source-type.hls { background: #d97706; }
+        .source-type.presentation { background: #6b7280; }
+
+        .tag { font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: 600; white-space: nowrap; }
+        .tag.auto-yes { background: #166534; color: #86efac; }
+        .tag.auto-no { background: #374151; color: #9ca3af; }
+        .tag.ok { background: #166534; color: #86efac; }
+        .tag.err { background: #7f1d1d; color: #fca5a5; }
+        .tag.pending { background: #1e3a5f; color: #93c5fd; }
+        .tag.duration { background: #374151; color: #fbbf24; }
+
+        .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+        .empty { color: #6b7280; font-size: 13px; padding: 24px 0; text-align: center; }
+        .error-msg {
+            background: #7f1d1d; border: 1px solid #ef4444; border-radius: 8px;
+            color: #fee2e2; padding: 10px 14px; font-size: 13px; margin: 8px 0;
+        }
+        .success-msg {
+            background: #14532d; border: 1px solid #22c55e; border-radius: 8px;
+            color: #bbf7d0; padding: 10px 14px; font-size: 13px; margin: 8px 0;
+        }
+
+        .channels-result { margin-top: 8px; }
+        .channels-result select { width: 100%; margin-bottom: 8px; }
+        .channels-result option { padding: 4px; }
+
+        .inlined-form { display: none; margin-top: 6px; }
+        .inlined-form.open { display: flex; gap: 6px; flex-wrap: wrap; }
+
+        .url-cell { word-break: break-all; max-width: 300px; }
+
+        @media (max-width: 700px) {
+            body { padding: 12px; }
+            table, thead, tbody, th, td, tr { display: block; }
+            th { display: none; }
+            td { padding: 6px 10px; }
+            td::before { content: attr(data-label); color: #9ca3af; font-size: 11px; display: inline-block; width: 70px; font-weight: 600; }
+            .input-row { flex-direction: column; }
+            .input-row input { min-width: 0; }
+            .url-cell { max-width: none; }
+        }
+    </style>
+</head>
+<body>
+<main>
+    <div class="nav">
+        <h1 style="margin:0;">Fuentes</h1>
+        <h2 style="margin:0; flex:1;">{{ app_version }}</h2>
+        <a href="/" class="btn btn-primary">Volver a parrilla</a>
+    </div>
+
+    <div id="messages"></div>
+
+    <div class="card">
+        <div class="section-header" style="display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap;">
+            <h3 style="margin:0;">Todas las fuentes</h3>
+            <button class="btn btn-sm" onclick="refreshPage()">Recargar</button>
+        </div>
+        {% if sources %}
+        <div style="overflow-x:auto;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Tipo</th>
+                    <th>Nombre</th>
+                    <th>URL</th>
+                    <th>Duracion</th>
+                    <th>Auto</th>
+                    <th>Val.</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in sources %}
+                <tr>
+                    <td><span class="source-type {{ s.type }}">{{ s.type }}</span></td>
+                    <td data-label="Nombre">{{ s.name }}</td>
+                    <td data-label="URL" class="url-cell">{{ s.url }}</td>
+                    <td data-label="Duracion">
+                        {% if s.duration_label %}
+                            <span class="tag duration">{{ s.duration_label }}</span>
+                        {% else %}
+                            <span style="color:#6b7280;">-</span>
+                        {% endif %}
+                    </td>
+                    <td data-label="Auto">
+                        <span class="tag {{ 'auto-yes' if s.auto_enabled else 'auto-no' }}"
+                              onclick="toggleAuto('{{ s.id }}')" style="cursor:pointer;">
+                            {{ 'ON' if s.auto_enabled else 'OFF' }}
+                        </span>
+                    </td>
+                    <td data-label="Val.">
+                        {% if s.validation %}
+                            <span class="tag {{ 'ok' if s.validation.status == 'ok' else 'err' }}">
+                                {{ 'OK' if s.validation.status == 'ok' else 'ERR' }}
+                            </span>
+                        {% else %}
+                            <span class="tag pending">-</span>
+                        {% endif %}
+                    </td>
+                    <td data-label="Acciones">
+                        <div class="actions">
+                            <button class="btn btn-sm" onclick="probeSource('{{ s.id }}')">Probar</button>
+                            <button class="btn btn-sm" onclick="editSource('{{ s.id }}')">Editar</button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteSource('{{ s.id }}')">Eliminar</button>
+                        </div>
+                        <div class="inlined-form" id="edit-form-{{ s.id }}">
+                            <input type="text" id="edit-name-{{ s.id }}" value="{{ s.name }}" placeholder="Nombre">
+                            <input type="url" id="edit-url-{{ s.id }}" value="{{ s.url }}" placeholder="URL">
+                            <button class="btn btn-sm btn-success" onclick="saveEdit('{{ s.id }}')">Guardar</button>
+                            <button class="btn btn-sm" onclick="cancelEdit('{{ s.id }}')">Cancelar</button>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% else %}
+            <div class="empty">No hay fuentes anadidas. Usa los formularios de abajo para anadir.</div>
+        {% endif %}
+    </div>
+
+    <div style="display:grid; gap:16px; grid-template-columns:1fr 1fr;">
+        <div class="card">
+            <h3>Añadir YouTube</h3>
+            <div class="input-row">
+                <input type="text" id="yt-name" placeholder="Nombre (opcional)">
+                <input type="url" id="yt-url" placeholder="https://youtube.com/watch?v=...">
+            </div>
+            <button class="btn btn-primary" onclick="addYoutube()">Añadir</button>
+        </div>
+
+        <div class="card">
+            <h3>Añadir HLS directo</h3>
+            <div class="input-row">
+                <input type="text" id="hls-name" placeholder="Nombre (opcional)">
+                <input type="url" id="hls-url" placeholder="https://ejemplo.com/stream.m3u8">
+            </div>
+            <button class="btn btn-primary" onclick="addHls()">Añadir</button>
+        </div>
+
+        <div class="card" style="grid-column:1/-1;">
+            <h3>Cargar lista IPTV</h3>
+            <div class="input-row">
+                <input type="url" id="iptv-url" placeholder="https://ejemplo.com/lista.m3u">
+                <button class="btn btn-primary" onclick="loadIptv()">Cargar</button>
+            </div>
+            <div id="iptv-result" class="channels-result" style="display:none;">
+                <select id="iptv-channels-select" size="5"></select>
+                <div class="input-row" style="margin-top:6px;">
+                    <input type="text" id="iptv-channel-name" placeholder="Nombre del canal (opcional)">
+                    <button class="btn btn-success" onclick="addIptvChannel()">Añadir a fuentes</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="card" style="grid-column:1/-1;">
+            <h3>Proveedores Xtream</h3>
+            <div id="iptv-providers-info" style="font-size:13px; color:#9ca3af; margin-bottom:8px;">
+                {{ iptv_providers|length }} proveedor(es) configurado(s)
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button class="btn btn-primary" onclick="importIptvSpain()">Importar España</button>
+                <button class="btn btn-sm" onclick="checkIptv()">Verificar canales ahora</button>
+            </div>
+            <div id="iptv-import-result" style="margin-top:8px; font-size:13px;"></div>
+        </div>
+    </div>
+</main>
+
+<script>
+    function showMsg(text, isError) {
+        var el = document.getElementById('messages');
+        el.innerHTML = '<div class="' + (isError ? 'error-msg' : 'success-msg') + '">' + text + '</div>';
+        setTimeout(function() { el.innerHTML = ''; }, 4000);
+    }
+
+    function refreshPage() { location.reload(); }
+
+    function addYoutube() {
+        var name = document.getElementById('yt-name').value.trim() || 'YouTube';
+        var url = document.getElementById('yt-url').value.trim();
+        if (!url) { showMsg('Introduce una URL de YouTube', true); return; }
+        var form = new FormData();
+        form.append('name', name);
+        form.append('url', url);
+        fetch('/api/sources/add_youtube', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(d) { if (d.ok) { refreshPage(); } else { showMsg(d.error || 'Error', true); } });
+    }
+
+    function addHls() {
+        var name = document.getElementById('hls-name').value.trim() || 'HLS Directo';
+        var url = document.getElementById('hls-url').value.trim();
+        if (!url) { showMsg('Introduce una URL HLS', true); return; }
+        var form = new FormData();
+        form.append('name', name);
+        form.append('url', url);
+        fetch('/api/sources/add_hls', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(d) { if (d.ok) { refreshPage(); } else { showMsg(d.error || 'Error', true); } });
+    }
+
+    var lastIptvResult = null;
+
+    function loadIptv() {
+        var url = document.getElementById('iptv-url').value.trim();
+        if (!url) { showMsg('Introduce una URL de lista IPTV', true); return; }
+        var form = new FormData();
+        form.append('iptv_url', url);
+        fetch('/api/load_iptv', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                var resultDiv = document.getElementById('iptv-result');
+                var select = document.getElementById('iptv-channels-select');
+                select.innerHTML = '';
+                if (!d.ok || !d.channels || d.channels.length === 0) {
+                    showMsg(d.error || 'No se encontraron canales', true);
+                    resultDiv.style.display = 'none';
+                    return;
+                }
+                lastIptvResult = d.channels;
+                d.channels.forEach(function(ch) {
+                    var opt = document.createElement('option');
+                    opt.value = ch.url;
+                    opt.textContent = ch.name;
+                    select.appendChild(opt);
+                });
+                resultDiv.style.display = 'block';
+            });
+    }
+
+    function addIptvChannel() {
+        var select = document.getElementById('iptv-channels-select');
+        var nameInput = document.getElementById('iptv-channel-name');
+        if (!select.value) { showMsg('Selecciona un canal', true); return; }
+        var name = nameInput.value.trim() || select.options[select.selectedIndex].text;
+        var form = new FormData();
+        form.append('name', name);
+        form.append('url', select.value);
+        fetch('/api/sources/add_iptv', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(d) { if (d.ok) { refreshPage(); } else { showMsg(d.error || 'Error', true); } });
+    }
+
+    function toggleAuto(id) {
+        var form = new FormData();
+        form.append('source_id', id);
+        fetch('/api/sources/toggle_auto', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(d) { if (d.ok) { refreshPage(); } else { showMsg(d.error || 'Error', true); } });
+    }
+
+    function deleteSource(id) {
+        if (!confirm('Eliminar esta fuente?')) return;
+        var form = new FormData();
+        form.append('source_id', id);
+        fetch('/api/sources/delete', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(d) { if (d.ok) { refreshPage(); } else { showMsg(d.error || 'Error', true); } });
+    }
+
+    function probeSource(id) {
+        var form = new FormData();
+        form.append('source_id', id);
+        fetch('/api/sources/probe', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.ok) { refreshPage(); }
+                else { showMsg(d.error || 'Error al probar', true); }
+            });
+    }
+
+    function editSource(id) {
+        var form = document.getElementById('edit-form-' + id);
+        form.classList.toggle('open');
+    }
+
+    function cancelEdit(id) {
+        document.getElementById('edit-form-' + id).classList.remove('open');
+    }
+
+    function saveEdit(id) {
+        var name = document.getElementById('edit-name-' + id).value.trim() || 'Sin nombre';
+        var url = document.getElementById('edit-url-' + id).value.trim();
+        if (!url) { showMsg('La URL no puede estar vacia', true); return; }
+        var form = new FormData();
+        form.append('source_id', id);
+        form.append('name', name);
+        form.append('url', url);
+        fetch('/api/sources/update', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.ok) { refreshPage(); }
+                else { showMsg(d.error || 'Error al guardar', true); }
+            });
+    }
+
+    function importIptvSpain() {
+        var result = document.getElementById('iptv-import-result');
+        result.innerHTML = '<div style="color:#9ca3af;">Importando canales españoles…</div>';
+        fetch('/api/iptv/import', { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data.ok) {
+                    result.innerHTML = '<div class="error-msg">' + (data.error || 'Error') + '</div>';
+                    return;
+                }
+                var html = '<div class="success-msg">Importados ' + data.total_imported + ' canales';
+                if (data.total_errors > 0) html += ' (' + data.total_errors + ' errores)';
+                html += '</div><table style="font-size:12px; margin-top:8px;"><tr><th>Grupo</th><th>Total</th><th>Importados</th><th>Omitidos</th></tr>';
+                (data.results || []).forEach(function(r) {
+                    html += '<tr><td>' + (r.category_label || '') + '</td><td>' + r.total + '</td><td>' + r.imported + '</td><td>' + r.skipped + '</td></tr>';
+                });
+                html += '</table>';
+                result.innerHTML = html;
+            })
+            .catch(function(err) {
+                result.innerHTML = '<div class="error-msg">Error de red: ' + err.message + '</div>';
+            });
+    }
+
+    function checkIptv() {
+        var result = document.getElementById('iptv-import-result');
+        result.innerHTML = '<div style="color:#9ca3af;">Verificando canales IPTV…</div>';
+        fetch('/api/iptv/check', { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) {
+                    result.innerHTML = '<div class="success-msg">Verificación completada: ' + data.checked + ' canales revisados</div>';
+                } else {
+                    result.innerHTML = '<div class="error-msg">' + (data.error || 'Error') + '</div>';
+                }
+            })
+            .catch(function(err) {
+                result.innerHTML = '<div class="error-msg">Error de red: ' + err.message + '</div>';
+            });
+    }
+</script>
+</body>
+</html>

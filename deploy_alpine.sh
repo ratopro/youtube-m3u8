@@ -11,6 +11,9 @@ CACHE_TTL_SECONDS="3600"
 CACHE_MAX_MB="2048"
 CACHE_MAX_OBJECT_MB="64"
 LIVE_WINDOW_SEGMENTS="30"
+PRESENTATION_LOOP_COUNT="5000"
+APP_VERSION="2026.05.25-embyfix7"
+AUTO_PRESENTATION_ON_END="1"
 
 echo "[1/4] Descargando imagen mas reciente: ${IMAGE}"
 docker pull "${IMAGE}"
@@ -26,6 +29,9 @@ docker run -d \
   -e CACHE_MAX_MB="${CACHE_MAX_MB}" \
   -e CACHE_MAX_OBJECT_MB="${CACHE_MAX_OBJECT_MB}" \
   -e LIVE_WINDOW_SEGMENTS="${LIVE_WINDOW_SEGMENTS}" \
+  -e PRESENTATION_LOOP_COUNT="${PRESENTATION_LOOP_COUNT}" \
+  -e APP_VERSION="${APP_VERSION}" \
+  -e AUTO_PRESENTATION_ON_END="${AUTO_PRESENTATION_ON_END}" \
   --restart unless-stopped \
   "${IMAGE}"
 
@@ -40,3 +46,7 @@ echo "Para Emby (M3U Tuner):"
 echo "  http://TU_IP_ALPINE:${HOST_PORT}/channels.m3u"
 echo "o maxima calidad:"
 echo "  http://TU_IP_ALPINE:${HOST_PORT}/channels-max.m3u"
+echo "compatibilidad alta (direct):"
+echo "  http://TU_IP_ALPINE:${HOST_PORT}/channels-emby-direct.m3u"
+echo "video presentacion en bucle (si lo activas desde la web):"
+echo "  http://TU_IP_ALPINE:${HOST_PORT}/presentation.m3u8"

@@ -1,7 +1,7 @@
 import argparse
 import os
 
-from src.youtube_extractor import YouTubeExtractor
+from src.youtube_extractor import StreamExtractor
 from src.web import create_app
 
 def main():
@@ -17,7 +17,7 @@ def main():
     hls_url = None
     if url:
         print(f"Comprobando stream HLS desde: {url}")
-        hls_url = YouTubeExtractor(url).get_hls_url()
+        hls_url = StreamExtractor(url).get_hls_url()
 
     app = create_app(args.output_dir, upstream_hls_url=hls_url)
     print(f"Abre el reproductor en: http://{args.host}:{args.port}")

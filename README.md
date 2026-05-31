@@ -123,12 +123,14 @@ environment:
   CACHE_MAX_MB: "512"
   CACHE_MAX_OBJECT_MB: "32"
   LIVE_WINDOW_SEGMENTS: "30"
+  PRESENTATION_LOOP_COUNT: "1000"
 ```
 
 - `CACHE_TTL_SECONDS`: tiempo maximo de vida de cada fragmento en cache.
 - `CACHE_MAX_MB`: tamano total maximo de la cache.
 - `CACHE_MAX_OBJECT_MB`: tamano maximo de un segmento individual cacheable.
 - `LIVE_WINDOW_SEGMENTS`: numero de segmentos recientes que se entregan en playlists de medios; evita que Emby cargue listas DVR enormes.
+- `PRESENTATION_LOOP_COUNT`: repeticiones del video `sofa.mp4` en la playlist de presentacion para mantener emision continua.
 
 La cache no evita cortes si YouTube deja de entregar el directo, pero ayuda con microcortes, reintentos y peticiones repetidas del mismo segmento.
 

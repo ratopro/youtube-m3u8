@@ -1,3 +1,6 @@
 yt-dlp
 flask
 requests
+pycryptodome
+cloudscraper
+curl_cffi>=0.14,<0.15

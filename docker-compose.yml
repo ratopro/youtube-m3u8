@@ -7,6 +7,10 @@ services:
       CACHE_MAX_MB: "512"
       CACHE_MAX_OBJECT_MB: "32"
       LIVE_WINDOW_SEGMENTS: "30"
+      PRESENTATION_LOOP_COUNT: "1000"
+      STATE_FILE: "data/state.json"
     ports:
       - "5058:5000"
+    volumes:
+      - ./data:/app/data
     restart: unless-stopped

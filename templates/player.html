@@ -3,189 +3,1167 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Reemisor HLS Local</title>
+    <title>Parrilla TV - Reemisor HLS</title>
     <style>
+        * { box-sizing: border-box; }
         body {
             background: #111827;
             color: #f9fafb;
             font-family: Arial, sans-serif;
             margin: 0;
-            padding: 32px;
+            padding: 24px;
+            font-size: 15px;
         }
+        main { margin: 0 auto; max-width: 1200px; }
 
-        main {
-            margin: 0 auto;
-            max-width: 1100px;
+        h1 { font-size: 24px; margin: 0 0 4px; }
+        h2 { font-size: 17px; margin: 0 0 12px; color: #9ca3af; }
+        h3 { font-size: 15px; margin: 0 0 8px; color: #d1d5db; text-transform: uppercase; letter-spacing: 0.5px; }
+
+        .header { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+        .header         .status-tag {
+            font-size: 13px; padding: 4px 10px; border-radius: 20px; font-weight: 600;
         }
+        .status-tag.playing { background: #166534; color: #86efac; }
+        .status-tag.stopped { background: #7f1d1d; color: #fca5a5; }
+        .status-tag.auto { background: #1e3a5f; color: #93c5fd; }
+        .grid { display: grid; gap: 16px; grid-template-columns: 1fr; }
+        @media (min-width: 900px) { .grid { grid-template-columns: 1fr 1fr; } }
 
-        video {
-            background: #000;
-            border-radius: 12px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
-            width: 100%;
-        }
-
-        a { color: #93c5fd; }
-
-        .links {
-            display: grid;
-            gap: 6px;
-            margin-top: 14px;
-        }
-
-        form {
+        .card {
             background: #1f2937;
             border: 1px solid #374151;
             border-radius: 12px;
-            display: grid;
-            gap: 12px;
-            margin: 24px 0;
-            padding: 18px;
+            padding: 16px;
+        }
+        .card.full { grid-column: 1 / -1; }
+
+        .now-playing {
+            display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+        }
+        .now-playing .indicator {
+            width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
+        }
+        .indicator.live { background: #22c55e; animation: pulse 1.5s infinite; }
+        .indicator.stopped { background: #6b7280; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+        .now-info { flex: 1; min-width: 0; }
+        .now-info .name { font-size: 20px; font-weight: 700; }
+        .now-info .meta { font-size: 14px; color: #9ca3af; margin-top: 2px; }
+        .now-info .meta strong { color: #d1d5db; }
+
+        .btn {
+            background: #374151; border: 1px solid #4b5563; border-radius: 8px;
+            color: #fff; cursor: pointer; font-size: 14px; font-weight: 600;
+            padding: 8px 14px; transition: background 0.15s;
+        }
+        .btn:hover { background: #4b5563; }
+        .btn-primary { background: #2563eb; border-color: #2563eb; }
+        .btn-primary:hover { background: #1d4ed8; }
+        .btn-danger { background: #dc2626; border-color: #dc2626; }
+        .btn-danger:hover { background: #b91c1c; }
+        .btn-success { background: #16a34a; border-color: #16a34a; }
+        .btn-success:hover { background: #15803d; }
+        .btn-sm { padding: 6px 12px; font-size: 13px; }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .input-row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+        .input-row input, .input-row select {
+            background: #030712; border: 1px solid #4b5563; border-radius: 6px;
+            color: #fff; font-size: 14px; padding: 8px 10px; flex: 1; min-width: 100px;
+        }
+        .input-row input:focus, .input-row select:focus { outline: none; border-color: #2563eb; }
+
+        .source-list, .cal-list { list-style: none; padding: 0; margin: 0; }
+        .source-list li, .cal-list li {
+            display: flex; align-items: center; gap: 8px;
+            padding: 8px 10px; border-radius: 8px; border: 1px solid #374151;
+            margin-bottom: 6px; font-size: 14px; flex-wrap: wrap;
+        }
+        .source-list li:hover, .cal-list li:hover { background: #111827; }
+
+        .source-type { font-size: 12px; padding: 2px 6px; border-radius: 4px; font-weight: 600; }
+        .source-type.yt { background: #7c3aed; }
+        .source-type.iptv { background: #0891b2; }
+        .source-type.hls { background: #d97706; }
+        .source-type.pres { background: #6b7280; }
+
+        .tag { font-size: 12px; padding: 2px 6px; border-radius: 4px; font-weight: 600; }
+        .tag.auto-yes { background: #166534; color: #86efac; }
+        .tag.auto-no { background: #374151; color: #9ca3af; }
+        .tag.cal-enabled { background: #1e3a5f; color: #93c5fd; }
+        .tag.cal-disabled { background: #374151; color: #6b7280; }
+        .tag.cal-played { background: #374151; color: #6b7280; }
+
+        .actions { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+
+        .empty { color: #6b7280; font-size: 14px; padding: 12px 0; text-align: center; }
+        .error-msg {
+            background: #7f1d1d; border: 1px solid #ef4444; border-radius: 8px;
+            color: #fee2e2; padding: 10px 14px; font-size: 14px; margin: 8px 0;
+        }
+        .success-msg {
+            background: #14532d; border: 1px solid #22c55e; border-radius: 8px;
+            color: #bbf7d0; padding: 10px 14px; font-size: 14px; margin: 8px 0;
         }
 
-        label {
-            color: #d1d5db;
-            font-weight: 700;
+        .auto-toggle {
+            display: flex; align-items: center; gap: 10px; margin-top: 8px;
+        }
+        .toggle {
+            width: 44px; height: 24px; border-radius: 12px; border: none;
+            cursor: pointer; position: relative; transition: background 0.2s;
+        }
+        .toggle.on { background: #2563eb; }
+        .toggle.off { background: #4b5563; }
+        .toggle::after {
+            content: ""; position: absolute; top: 2px; left: 2px;
+            width: 20px; height: 20px; border-radius: 50%; background: #fff;
+            transition: transform 0.2s;
+        }
+        .toggle.on::after { transform: translateX(20px); }
+
+        .badge { font-size: 13px; background: #374151; padding: 2px 8px; border-radius: 10px; color: #d1d5db; }
+
+        .links { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+        .links a { color: #93c5fd; font-size: 14px; }
+        .links a:hover { color: #bfdbfe; }
+
+        .section-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+        .section-header h3 { margin: 0; }
+
+        .form-inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+        .channels-result { margin-top: 8px; }
+        .channels-result select { width: 100%; margin-bottom: 8px; }
+        .channels-result option { padding: 4px; }
+
+        .iptv-load-area { border: 1px dashed #4b5563; border-radius: 8px; padding: 12px; margin-top: 8px; }
+
+        .cal-time { font-weight: 700; color: #93c5fd; min-width: 45px; }
+        .cal-title { flex: 1; min-width: 0; }
+        .cal-source { color: #9ca3af; font-size: 13px; }
+
+        #countdown { color: #93c5fd; font-size: 14px; margin-left: 8px; font-variant-numeric: tabular-nums; }
+        .history-item { font-size: 13px; padding: 5px 8px; }
+
+        .preview-card { padding: 0; }
+        .preview-layout { display: flex; gap: 16px; padding: 16px; align-items: flex-start; }
+        .preview-info { flex: 1; min-width: 0; }
+        .preview-player { width: 340px; flex-shrink: 0; }
+        .preview-player video {
+            width: 100%; border-radius: 8px; background: #000;
+            max-height: 190px; object-fit: contain; display: block;
+        }
+        .preview-placeholder {
+            width: 100%; height: 130px; background: #030712;
+            border-radius: 8px; display: flex; align-items: center;
+            justify-content: center; color: #4b5563; font-size: 14px;
+        }
+        .next-row {
+            font-size:14px; color:#9ca3af; padding: 8px 16px 12px;
+            border-top: 1px solid #374151;
+        }
+        .preview-badge {
+            position: absolute; top: 8px; left: 8px;
+            font-size: 11px; font-weight: 700; padding: 2px 8px;
+            border-radius: 4px; background: #dc2626; color: #fff;
+            text-transform: uppercase; letter-spacing: 1px;
+        }
+        .preview-player { position: relative; }
+
+        @media (max-width: 700px) {
+            .preview-layout { flex-direction: column; }
+            .preview-player { width: 100%; }
         }
 
-        .input-row {
-            display: grid;
-            gap: 12px;
-            grid-template-columns: 1fr auto;
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7); z-index: 1000;
+            display: flex; align-items: center; justify-content: center;
         }
-
-        input {
-            background: #030712;
-            border: 1px solid #4b5563;
-            border-radius: 8px;
-            color: #fff;
-            font-size: 16px;
-            padding: 12px 14px;
+        .modal-content {
+            background: #1f2937; border: 1px solid #374151; border-radius: 12px;
+            padding: 20px; max-width: 340px; width: 90%;
         }
-
-        button {
-            background: #2563eb;
-            border: 0;
-            border-radius: 8px;
-            color: #fff;
-            cursor: pointer;
-            font-size: 16px;
-            font-weight: 700;
-            padding: 12px 18px;
+        .clock-picker {
+            display: flex; gap: 12px; justify-content: center; align-items: stretch;
         }
-
-        button:hover { background: #1d4ed8; }
-
-        button:disabled,
-        input:disabled {
-            cursor: not-allowed;
-            opacity: 0.55;
+        .clock-col {
+            overflow-y: auto; flex: 1; max-height: 260px;
+            scrollbar-width: thin;
         }
-
-        .disconnect-form {
-            margin-top: -12px;
+        .clock-col .cl-item {
+            padding: 8px 16px; cursor: pointer; text-align: center;
+            border-radius: 6px; font-size: 18px; font-weight: 600;
+            color: #9ca3af; transition: 0.1s;
         }
+        .clock-col .cl-item:hover { background: #374151; color: #fff; }
+        .clock-col .cl-item.selected { background: #2563eb; color: #fff; }
+        .clock-col-sep { font-size: 24px; display: flex; align-items: center; color: #9ca3af; padding: 0 4px; }
+        .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
 
-        .danger {
-            background: #dc2626;
+            .cal-after { color: #fbbf24; font-size: 12px; font-weight: 600; }
+        .cal-dur { color: #6ee7b7; font-size: 12px; margin-left: 4px; }
+        .cal-end { color: #9ca3af; font-size: 12px; }
+        .cal-depends { color: #fbbf24; font-size: 12px; font-style: italic; }
+
+        .cal-overlap { background: #3d2e00 !important; border-left: 3px solid #eab308 !important; }
+
+        .drag-handle {
+            cursor: grab; color: #6b7280; font-size: 16px; padding: 0 4px; user-select: none;
         }
+        .drag-handle:active { cursor: grabbing; }
+        .cal-list li.dragging { opacity: 0.5; border-style: dashed; }
+        .cal-list li.drag-over { border-color: #2563eb; border-style: solid; }
 
-        .danger:hover { background: #b91c1c; }
-
-        .status {
-            color: #d1d5db;
-            margin-top: 16px;
-        }
-
-        .error {
-            background: #7f1d1d;
-            border: 1px solid #ef4444;
-            border-radius: 8px;
-            color: #fee2e2;
-            padding: 12px 14px;
-        }
-
-        .connected {
-            color: #86efac;
-        }
-
-        @media (max-width: 720px) {
-            body { padding: 18px; }
-            .input-row { grid-template-columns: 1fr; }
+        @media (max-width: 600px) {
+            body { padding: 12px; }
+            .input-row { flex-direction: column; }
+            .input-row input { min-width: 0; }
+            .source-list li, .cal-list li { flex-direction: column; align-items: flex-start; }
+            .actions { margin-left: 0; width: 100%; justify-content: flex-end; }
         }
     </style>
 </head>
 <body>
-    <main>
-        <h1>Reemisor HLS Local</h1>
-
-        <form action="/connect" method="post">
-            <label for="url">URL del directo de YouTube</label>
-            <div class="input-row">
-                <input id="url" name="url" type="url" value="{{ source_url }}" placeholder="https://www.youtube.com/live/..." required {% if connected %}disabled{% endif %}>
-                <button type="submit" {% if connected %}disabled{% endif %}>Conectar</button>
-            </div>
-            {% if connected %}
-                <span class="connected">Directo conectado. Para cambiar de URL, pulsa Desconectar y se limpiara la cache de la emision actual.</span>
-            {% endif %}
-            {% if error %}
-                <div class="error">{{ error }}</div>
-            {% endif %}
-        </form>
-
+<main>
+    <div class="header">
+        <div>
+            <h1>Parrilla TV</h1>
+            <h2>Reemisor HLS Local · {{ app_version }}</h2>
+        </div>
         {% if connected %}
-            <form class="disconnect-form" action="/disconnect" method="post">
-                <button class="danger" type="submit">Desconectar</button>
-            </form>
-        {% endif %}
-
-        {% if connected %}
-            <video id="video" controls autoplay muted playsinline></video>
-            <p class="status" id="status">Cargando stream local...</p>
-            <div class="links">
-                <span>Playlist adaptativa para Emby: <a href="{{ playlist_url }}">{{ playlist_url }}</a></span>
-                <span>Playlist maxima calidad: <a href="/live-max.m3u8">/live-max.m3u8</a></span>
-                <span>Lista M3U maxima calidad: <a href="/channels-max.m3u">/channels-max.m3u</a></span>
-            </div>
+            <span class="status-tag playing">
+                {% if current_reason == 'calendar' %}Programado
+                {% elif current_reason == 'auto' %}Auto
+                {% elif current_reason == 'manual' %}Manual
+                {% else %}Emision{% endif %}
+            </span>
         {% else %}
-            <p class="status">Introduce la URL del directo y pulsa Conectar para iniciar la reproduccion.</p>
+            <span class="status-tag stopped">Detenido</span>
         {% endif %}
-    </main>
+        {% if auto_enabled and not connected %}
+            <span class="status-tag auto">Auto activo</span>
+        {% endif %}
+        <a href="/sources" class="btn btn-sm" style="margin-left:auto; text-decoration:none;">Fuentes</a>
+    </div>
 
-    {% if connected %}
-        <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-        <script>
-            const video = document.getElementById('video');
-            const status = document.getElementById('status');
-            const playbackUrl = '{{ playback_url }}';
-            const isHls = {{ 'true' if is_hls else 'false' }};
-
-            if (!isHls) {
-                video.src = playbackUrl;
-                status.textContent = 'Reproduciendo video directo.';
-                video.play().catch(() => {
-                    status.textContent = 'Pulsa play para iniciar el video.';
-                });
-            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                video.src = playbackUrl;
-                status.textContent = 'Reproduciendo HLS nativo.';
-            } else if (window.Hls && Hls.isSupported()) {
-                const hls = new Hls({ liveSyncDurationCount: 3 });
-                hls.loadSource(playbackUrl);
-                hls.attachMedia(video);
-                hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                    status.textContent = 'Reproduciendo HLS con hls.js.';
-                    video.play().catch(() => {
-                        status.textContent = 'Pulsa play para iniciar el directo.';
-                    });
-                });
-                hls.on(Hls.Events.ERROR, (_, data) => {
-                    status.textContent = `Error HLS: ${data.details}`;
-                });
-            } else {
-                status.textContent = 'Este navegador no soporta HLS.';
-            }
-        </script>
+    {% if error %}
+        <div class="error-msg" id="error-top">{{ error }}</div>
     {% endif %}
+
+    <div class="card full preview-card">
+        <div class="preview-layout">
+            <div class="preview-info">
+                <div class="now-playing">
+                    <span class="indicator {{ 'live' if connected else 'stopped' }}"></span>
+                    <div class="now-info">
+                        {% if connected %}
+                            <div class="name">{{ source_url_name or 'Sin nombre' }}</div>
+                            <div class="meta">
+                                {% if current_reason == 'calendar' %}
+                                    Programado &middot; {{ source_url }}
+                                {% elif current_reason == 'auto' %}
+                                    Seleccion automatica &middot; {{ source_url }}
+                                {% elif mode == 'presentation' %}
+                                    Video presentacion
+                                {% else %}
+                                    {{ source_url }}
+                                {% endif %}
+                            </div>
+                        {% else %}
+                            <div class="name">Sin emision</div>
+                            <div class="meta">
+                                {% if auto_enabled %}
+                                    En espera de seleccion automatica...
+                                {% else %}
+                                    Pulsa "Emitir ahora" en un programa o activa Auto
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="actions" style="margin-top:12px;">
+                    <button class="btn btn-sm" onclick="nextAuto()" {% if not auto_enabled %}disabled{% endif %}>Siguiente Auto</button>
+                    <button class="btn btn-sm" onclick="stopEmission()" {% if not connected %}disabled{% endif %}>Detener</button>
+                </div>
+            </div>
+            <div class="preview-player">
+                {% if connected %}
+                    <span class="preview-badge">EN DIRECTO</span>
+                    <video id="preview-video" muted autoplay playsinline controls {% if mode == 'presentation' %}loop{% endif %}></video>
+                {% else %}
+                    <div class="preview-placeholder">Sin emision</div>
+                {% endif %}
+            </div>
+        </div>
+        {% if connected and next_entry %}
+            <div class="next-row">
+                Proximo: <strong>{{ next_entry.title }}</strong> a las <strong>{{ next_entry.time }}</strong>
+                &middot; {{ source_map.get(next_entry.source_id, next_entry.source_id) }}
+                <span id="countdown"></span>
+            </div>
+        {% endif %}
+    </div>
+
+    <div class="card full">
+        <div class="section-header">
+            <h3>Calendario</h3>
+            <span class="badge">{{ calendar_today|length }} programas</span>
+            <div class="actions">
+                <button class="btn btn-sm btn-primary" onclick="toggleAddForm()">+ Añadir programa</button>
+                <button class="btn btn-sm" id="sources-panel-btn" onclick="toggleSourcesPanel()">Fuentes</button>
+                <button class="btn btn-sm" onclick="fetchFootballMatches()">⚽ Fútbol</button>
+                <button class="btn btn-sm" onclick="refreshCalendar()">Recargar</button>
+            </div>
+        </div>
+        <div class="input-row">
+            <input type="date" id="cal-date" value="{{ calendar_date }}">
+            <button class="btn btn-sm" onclick="changeDate()">Ir</button>
+        </div>
+        <div style="display:flex; gap:12px; position:relative;">
+            <div id="sources-panel" style="display:none; width:240px; flex-shrink:0; border-right:1px solid #374151; padding-right:12px; max-height:400px; overflow-y:auto;">
+                <div style="font-size:14px; color:#9ca3af; margin-bottom:8px; font-weight:600;">Arrastra al calendario</div>
+                {% for s in sources %}
+                {% if s.type not in ('football', 'iptv') %}
+                <div draggable="true" class="source-panel-item" data-source-id="{{ s.id }}"
+                     style="padding:6px 8px; margin-bottom:4px; border-radius:6px; border:1px solid #374151; cursor:grab; font-size:13px; display:flex; align-items:center; gap:6px; background:#111827;">
+                    <span style="color:#6b7280; font-size:14px;">☰</span>
+                    <span class="source-type {{ s.type }}" style="font-size:11px;">{{ s.type }}</span>
+                    <span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ s.name }}</span>
+                    {% if s.duration_label %}
+                        <span style="color:#6ee7b7; font-size:11px;">{{ s.duration_label }}</span>
+                    {% endif %}
+                </div>
+                {% endif %}
+                {% endfor %}
+            </div>
+            <div style="flex:1; min-width:0;">
+                <div id="calendar-list">
+                    {% if calendar_today %}
+            <ul class="cal-list" id="cal-list-today">
+                {% for e in calendar_today %}
+                <li draggable="true" data-id="{{ e.id }}"{% if e.id in overlap_ids %} class="cal-overlap"{% endif %}>
+                    <span class="drag-handle">☰</span>
+                    {% if e.get('start_mode') == 'after_previous' %}
+                        <span class="cal-after">Despues del anterior</span>
+                    {% else %}
+                        <span class="cal-time">{{ e.time }}</span>
+                    {% endif %}
+                    <span class="cal-title">{{ e.title }}</span>
+                    <span class="cal-source">{{ source_map.get(e.source_id, e.source_id) }}</span>
+                    {% if e.get('duration_label') %}
+                        <span class="cal-dur">{{ e.duration_label }}</span>
+                    {% endif %}
+                    {% if e.get('end_time') %}
+                        <span class="cal-end">Fin {{ e.end_time }}</span>
+                    {% elif e.get('start_mode') == 'time' and e.get('time') and not e.get('duration_seconds') %}
+                        <span class="cal-depends">Depende del emisor</span>
+                    {% elif e.get('start_mode') == 'after_previous' and not e.get('end_time') %}
+                        <span class="cal-depends">Depende del emisor</span>
+                    {% endif %}
+                    {% if e.status == 'played' %}
+                        <span class="tag cal-played">Emitido</span>
+                    {% elif not e.enabled %}
+                        <span class="tag cal-disabled">Off</span>
+                    {% else %}
+                        <span class="tag cal-enabled">Pendiente</span>
+                    {% endif %}
+                    <div class="actions">
+                        {% if e.enabled %}
+                            <button class="btn btn-sm btn-success" onclick="playNow('{{ e.id }}')">Emitir</button>
+                        {% endif %}
+                        <button class="btn btn-sm" onclick="toggleCal('{{ e.id }}')">
+                            {{ 'Desactivar' if e.enabled else 'Activar' }}
+                        </button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteCal('{{ e.id }}')">Eliminar</button>
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+                <div class="empty">No hay programas para hoy</div>
+            {% endif %}
+        </div>
+        <details style="margin-top:12px;" id="cal-details">
+            <summary style="cursor:pointer; font-size:14px; color:#93c5fd;">+ Añadir programa</summary>
+            <div class="iptv-load-area">
+                <div class="input-row">
+                    <select id="cal-source-id">
+                        <option value="">-- Selecciona fuente --</option>
+                        {% for s in sources %}
+                        <option value="{{ s.id }}">{{ s.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="input-row">
+                    <input type="time" id="cal-time">
+                    <button class="btn btn-sm" id="clock-btn" onclick="openClockModal()" style="min-width:40px;">🕐</button>
+                    <input type="text" id="cal-title" placeholder="Titulo del programa">
+                    <button class="btn btn-sm btn-primary" onclick="addCalendar()">Añadir</button>
+                </div>
+                <label style="font-size:14px; color:#9ca3af; display:flex; align-items:center; gap:6px; cursor:pointer; margin-top:4px;">
+                    <input type="checkbox" id="cal-no-time" onchange="toggleNoTime()">
+                    Sin hora de inicio (se emite al terminar el anterior)
+                </label>
+            </div>
+        </details>
+        <div class="modal-overlay" id="clock-modal" style="display:none;" onclick="if(event.target===this)closeClockModal()">
+            <div class="modal-content">
+                <div class="clock-picker">
+                    <div class="clock-col" id="clock-hours"></div>
+                    <div class="clock-col-sep">:</div>
+                    <div class="clock-col" id="clock-minutes"></div>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-sm" onclick="closeClockModal()">Cancelar</button>
+                    <button class="btn btn-sm btn-primary" onclick="acceptClockModal()">Aceptar</button>
+                </div>
+            </div>
+        </div>
+        <script>
+        document.getElementById('cal-details').addEventListener('toggle', function() {
+            if (this.open) {
+                var d = new Date();
+                var defaultTime = String(d.getHours()).padStart(2,'0') + ':' +
+                    String(d.getMinutes()).padStart(2,'0');
+                // Try to auto-fill from last calendar entry's end time
+                var date = document.getElementById('cal-date').value;
+                var form = new FormData();
+                form.append('date', date);
+                fetch('/api/calendar/last', { method: 'POST', body: form })
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        var last = data.last;
+                        if (last && last.end_time) {
+                            document.getElementById('cal-time').value = last.end_time;
+                        } else if (last && last.time && last.start_mode === 'time' && !last.duration_seconds) {
+                            document.getElementById('cal-no-time').checked = true;
+                            toggleNoTime();
+                        } else {
+                            document.getElementById('cal-time').value = defaultTime;
+                        }
+                    })
+                    .catch(function() {
+                        document.getElementById('cal-time').value = defaultTime;
+                    });
+            }
+        });
+        function toggleNoTime() {
+            var cb = document.getElementById('cal-no-time');
+            var time = document.getElementById('cal-time');
+            var btn = document.getElementById('clock-btn');
+            time.disabled = cb.checked;
+            btn.disabled = cb.checked;
+        }
+        function openClockModal() {
+            var modal = document.getElementById('clock-modal');
+            var hCol = document.getElementById('clock-hours');
+            var mCol = document.getElementById('clock-minutes');
+            if (!hCol.hasChildNodes()) {
+                for (var i = 0; i < 24; i++) {
+                    var el = document.createElement('div');
+                    el.className = 'cl-item';
+                    el.dataset.value = String(i).padStart(2,'0');
+                    el.textContent = String(i).padStart(2,'0');
+                    el.onclick = function() {
+                        hCol.querySelectorAll('.selected').forEach(function(x){x.className='cl-item'});
+                        this.className = 'cl-item selected';
+                        this.scrollIntoView({block:'center'});
+                    };
+                    hCol.appendChild(el);
+                }
+                for (var i = 0; i < 60; i++) {
+                    var el = document.createElement('div');
+                    el.className = 'cl-item';
+                    el.dataset.value = String(i).padStart(2,'0');
+                    el.textContent = String(i).padStart(2,'0');
+                    el.onclick = function() {
+                        mCol.querySelectorAll('.selected').forEach(function(x){x.className='cl-item'});
+                        this.className = 'cl-item selected';
+                        this.scrollIntoView({block:'center'});
+                    };
+                    mCol.appendChild(el);
+                }
+            }
+            var now = new Date();
+            var curH = String(now.getHours()).padStart(2,'0');
+            var curM = String(now.getMinutes()).padStart(2,'0');
+            var hEl = hCol.querySelector('[data-value="'+curH+'"]');
+            var mEl = mCol.querySelector('[data-value="'+curM+'"]');
+            if (hEl) { hEl.className = 'cl-item selected'; setTimeout(function(){hEl.scrollIntoView({block:'center'});},50); }
+            if (mEl) { mEl.className = 'cl-item selected'; setTimeout(function(){mEl.scrollIntoView({block:'center'});},50); }
+            modal.style.display = 'flex';
+        }
+        function closeClockModal() {
+            document.getElementById('clock-modal').style.display = 'none';
+        }
+        function acceptClockModal() {
+            var h = document.querySelector('#clock-hours .selected');
+            var m = document.querySelector('#clock-minutes .selected');
+            if (h && m) {
+                document.getElementById('cal-time').value = h.dataset.value + ':' + m.dataset.value;
+            }
+            closeClockModal();
+        }
+        </script>
+        </div>
+    </div>
+</div>
+
+<div class="card full">
+    <div class="section-header">
+        <h3>Modo Auto</h3>
+    </div>
+    <div class="auto-toggle">
+        <button class="toggle {{ 'on' if auto_enabled else 'off' }}" id="auto-toggle-btn"
+                onclick="toggleAuto()"></button>
+        <span id="auto-status">{{ 'Auto activo' if auto_enabled else 'Auto desactivado' }}</span>
+    </div>
+    {% if auto_enabled %}
+        <div style="font-size:14px; color:#9ca3af; margin-top:8px;">
+            Selecciona fuentes con "Auto ON" para incluirlas en la rotacion.
+            El video de presentacion se incluye automaticamente.
+        </div>
+    {% endif %}
+</div>
+
+<div class="card full">
+    <div class="section-header">
+        <h3>Historial de emision</h3>
+            <button class="btn btn-sm" onclick="loadHistory()">Recargar</button>
+        </div>
+        <div id="history-list" style="max-height:300px; overflow-y:auto;">
+            <div class="empty">Cargando...</div>
+        </div>
+    </div>
+
+    <div class="card full">
+        <div class="section-header">
+            <h3>Enlaces</h3>
+        </div>
+        <div class="links">
+            <a href="/live.m3u8">/live.m3u8</a>
+            <a href="/live-max.m3u8">/live-max.m3u8</a>
+            <a href="/channels-max.m3u">/channels-max.m3u</a>
+            <a href="/channels.m3u">/channels.m3u</a>
+            <a href="/channels-emby-direct.m3u">/channels-emby-direct.m3u</a>
+            <a href="/guide.xml">/guide.xml</a>
+            <a href="/health">/health</a>
+        </div>
+    </div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+<script>
+    var previewVideo = document.getElementById('preview-video');
+
+    function setupPlayer() {
+        if (!previewVideo) return;
+        var playbackUrl = '{{ playback_url }}';
+        var isHls = {{ 'true' if is_hls else 'false' }};
+
+        if (!playbackUrl || playbackUrl === 'None') return;
+
+        if (!isHls) {
+            previewVideo.src = playbackUrl;
+            previewVideo.play().catch(function() {});
+        } else if (previewVideo.canPlayType('application/vnd.apple.mpegurl')) {
+            previewVideo.src = playbackUrl;
+        } else if (window.Hls && Hls.isSupported()) {
+            var hls = new Hls({ liveSyncDurationCount: 3 });
+            hls.loadSource(playbackUrl);
+            hls.attachMedia(previewVideo);
+            hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                previewVideo.play().catch(function() {});
+            });
+        }
+    }
+    setupPlayer();
+
+    function showError(msg) {
+        var el = document.getElementById('error-top');
+        if (el) {
+            el.textContent = msg;
+            el.style.display = 'block';
+            setTimeout(function() { el.style.display = 'none'; }, 5000);
+        }
+    }
+
+    function refreshCalendar() {
+        var date = document.getElementById('cal-date').value;
+        var form = new FormData();
+        form.append('date', date);
+        fetch('/api/calendar', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var list = document.getElementById('calendar-list');
+                var entries = data.entries || [];
+                var sMap = data.source_map || {};
+                if (entries.length === 0) {
+                    list.innerHTML = '<div class="empty">No hay programas para hoy</div>';
+                    return;
+                }
+                var html = '<ul class="cal-list" id="cal-list-today">';
+                entries.forEach(function(e, idx) {
+                    var statusTag = '';
+                    if (e.status === 'played') {
+                        statusTag = '<span class="tag cal-played">Emitido</span>';
+                    } else if (!e.enabled) {
+                        statusTag = '<span class="tag cal-disabled">Off</span>';
+                    } else {
+                        statusTag = '<span class="tag cal-enabled">Pendiente</span>';
+                    }
+                    var playBtn = e.enabled
+                        ? '<button class="btn btn-sm btn-success" onclick="playNow(\'' + e.id + '\')">Emitir</button>'
+                        : '';
+                    var toggleLabel = e.enabled ? 'Desactivar' : 'Activar';
+                    var timeHtml = e.start_mode === 'after_previous'
+                        ? '<span class="cal-after">Despues del anterior</span>'
+                        : '<span class="cal-time">' + e.time + '</span>';
+                    var durHtml = e.duration_label
+                        ? '<span class="cal-dur">' + escapeHtml(e.duration_label) + '</span>'
+                        : '';
+                    var endHtml = '';
+                    if (e.end_time) {
+                        endHtml = '<span class="cal-end">Fin ' + e.end_time + '</span>';
+                    } else if (e.start_mode === 'time' && e.time && !e.duration_seconds) {
+                        endHtml = '<span class="cal-depends">Depende del emisor</span>';
+                    } else if (e.start_mode === 'after_previous' && !e.end_time) {
+                        endHtml = '<span class="cal-depends">Depende del emisor</span>';
+                    }
+                    var overlapClass = '';
+                    var next = entries[idx + 1];
+                    if (e.end_time && next && next.time && e.end_time > next.time) {
+                        overlapClass = ' class="cal-overlap"';
+                    }
+                    html += '<li draggable="true" data-id="' + e.id + '"' + overlapClass + '>'
+                        + '<span class="drag-handle">☰</span>'
+                        + timeHtml
+                        + '<span class="cal-title">' + escapeHtml(e.title) + '</span>'
+                        + '<span class="cal-source">' + escapeHtml(sMap[e.source_id] || e.source_id) + '</span>'
+                        + durHtml
+                        + endHtml
+                        + statusTag
+                        + '<div class="actions">'
+                        + playBtn
+                        + '<button class="btn btn-sm" onclick="toggleCal(\'' + e.id + '\')">' + toggleLabel + '</button>'
+                        + '<button class="btn btn-sm btn-danger" onclick="deleteCal(\'' + e.id + '\')">Eliminar</button>'
+                        + '</div>'
+                        + '</li>';
+                });
+                html += '</ul>';
+                list.innerHTML = html;
+                setupDragDrop();
+            });
+    }
+
+    function escapeHtml(text) {
+        var d = document.createElement('div');
+        d.textContent = text;
+        return d.innerHTML;
+    }
+
+    function changeDate() {
+        refreshCalendar();
+    }
+
+    function addCalendar() {
+        var date = document.getElementById('cal-date').value;
+        var time = document.getElementById('cal-time').value;
+        var sel = document.getElementById('cal-source-id');
+        var sourceId = sel.value;
+        var title = document.getElementById('cal-title').value || 'Programa';
+        var noTime = document.getElementById('cal-no-time').checked;
+        if (!date || !sourceId) {
+            showError('Selecciona fecha y fuente');
+            return;
+        }
+        if (!noTime && !time) {
+            showError('Selecciona hora o marca "Sin hora de inicio"');
+            return;
+        }
+        var form = new FormData();
+        form.append('date', date);
+        form.append('time', time);
+        form.append('source_id', sourceId);
+        form.append('title', title);
+        form.append('start_mode', noTime ? 'after_previous' : 'time');
+        fetch('/api/calendar/add', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) {
+                    document.getElementById('cal-time').value = '';
+                    document.getElementById('cal-title').value = '';
+                    document.getElementById('cal-no-time').checked = false;
+                    toggleNoTime();
+                    refreshCalendar();
+                } else {
+                    showError(data.error || 'Error al anadir');
+                }
+            });
+    }
+
+    function deleteCal(id) {
+        if (!confirm('Eliminar este programa?')) return;
+        var form = new FormData();
+        form.append('cal_id', id);
+        fetch('/api/calendar/delete', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) refreshCalendar();
+                else showError(data.error || 'Error');
+            });
+    }
+
+    function toggleCal(id) {
+        var form = new FormData();
+        form.append('cal_id', id);
+        fetch('/api/calendar/toggle', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) refreshCalendar();
+                else showError(data.error || 'Error');
+            });
+    }
+
+    function playNow(id) {
+        var form = new FormData();
+        form.append('cal_id', id);
+        fetch('/api/calendar/play_now', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) { location.reload(); }
+                else { showError(data.error || 'Error al emitir'); }
+            });
+    }
+
+    function stopEmission() {
+        fetch('/api/stop', { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) location.reload();
+            });
+    }
+
+    function addYoutube() {
+        var name = document.getElementById('yt-name').value || 'YouTube';
+        var url = document.getElementById('yt-url').value;
+        if (!url) { showError('Introduce una URL de YouTube'); return; }
+        var form = new FormData();
+        form.append('name', name);
+        form.append('url', url);
+        fetch('/api/sources/add_youtube', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) { location.reload(); }
+                else { showError(data.error || 'Error'); }
+            });
+    }
+
+    function addHls() {
+        var name = document.getElementById('hls-name').value || 'HLS Directo';
+        var url = document.getElementById('hls-url').value;
+        if (!url) { showError('Introduce una URL HLS'); return; }
+        var form = new FormData();
+        form.append('name', name);
+        form.append('url', url);
+        fetch('/api/sources/add_hls', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) { location.reload(); }
+                else { showError(data.error || 'Error'); }
+            });
+    }
+
+    var lastIptvResult = null;
+
+    function loadIptv() {
+        var url = document.getElementById('iptv-url').value;
+        if (!url) { showError('Introduce una URL de lista IPTV'); return; }
+        var form = new FormData();
+        form.append('iptv_url', url);
+        fetch('/api/load_iptv', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var resultDiv = document.getElementById('iptv-result');
+                var select = document.getElementById('iptv-channels-select');
+                select.innerHTML = '';
+                if (!data.ok || !data.channels || data.channels.length === 0) {
+                    showError(data.error || 'No se encontraron canales');
+                    resultDiv.style.display = 'none';
+                    return;
+                }
+                lastIptvResult = data.channels;
+                data.channels.forEach(function(ch) {
+                    var opt = document.createElement('option');
+                    opt.value = ch.url;
+                    opt.textContent = ch.name;
+                    select.appendChild(opt);
+                });
+                resultDiv.style.display = 'block';
+            });
+    }
+
+    function addIptvChannel() {
+        var select = document.getElementById('iptv-channels-select');
+        var nameInput = document.getElementById('iptv-channel-name');
+        if (!select.value) { showError('Selecciona un canal'); return; }
+        var name = nameInput.value || select.options[select.selectedIndex].text;
+        var form = new FormData();
+        form.append('name', name);
+        form.append('url', select.value);
+        fetch('/api/sources/add_iptv', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) { location.reload(); }
+                else { showError(data.error || 'Error'); }
+            });
+    }
+
+    function deleteSource(id) {
+        if (!confirm('Eliminar esta fuente?')) return;
+        var form = new FormData();
+        form.append('source_id', id);
+        fetch('/api/sources/delete', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) { location.reload(); }
+                else { showError(data.error || 'Error'); }
+            });
+    }
+
+    function toggleSourceAuto(id) {
+        var form = new FormData();
+        form.append('source_id', id);
+        fetch('/api/sources/toggle_auto', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) { location.reload(); }
+                else { showError(data.error || 'Error'); }
+            });
+    }
+
+    function toggleAuto() {
+        fetch('/api/auto/toggle', { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) { location.reload(); }
+                else { showError(data.error || 'Error'); }
+            });
+    }
+
+    function nextAuto() {
+        fetch('/api/auto/next', { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) { location.reload(); }
+                else { showError(data.error || 'No hay fuentes auto disponibles'); }
+            });
+    }
+
+    function validateSource(id) {
+        var form = new FormData();
+        form.append('source_id', id);
+        fetch('/api/sources/validate', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) { location.reload(); }
+                else { showError(data.error || 'Error'); }
+            });
+    }
+
+    function loadHistory() {
+        fetch('/api/history', { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var list = document.getElementById('history-list');
+                var hist = data.history || [];
+                if (hist.length === 0) {
+                    list.innerHTML = '<div class="empty">Sin historial</div>';
+                    return;
+                }
+                var html = '<ul class="cal-list" style="font-size:13px;">';
+                hist.forEach(function(h) {
+                    var statusColor = h.success ? '#86efac' : '#fca5a5';
+                    var reasonLabel = h.reason === 'calendar' ? 'Programado'
+                        : h.reason === 'auto' ? 'Auto'
+                        : h.reason === 'auto_gap' ? 'Auto (relleno)'
+                        : h.reason === 'manual' ? 'Manual'
+                        : h.reason === 'after_previous' ? 'Siguiente'
+                        : h.reason || '-';
+                    var time = h.timestamp ? h.timestamp.replace('T', ' ').substring(0, 19) : '-';
+                    html += '<li style="font-size:13px; padding:5px 8px;">'
+                        + '<span style="color:' + statusColor + '; font-weight:700;">'
+                        + (h.success ? 'OK' : 'ERR') + '</span> '
+                        + '<span style="color:#9ca3af;">' + time + '</span> '
+                        + '<strong>' + escapeHtml(h.source_name || '-') + '</strong> '
+                        + '<span class="tag" style="font-size:11px;">' + reasonLabel + '</span>'
+                        + (h.error ? ' <span style="color:#fca5a5;">' + escapeHtml(h.error) + '</span>' : '')
+                        + '</li>';
+                });
+                html += '</ul>';
+                list.innerHTML = html;
+            });
+    }
+
+    function updateCountdown() {
+        var el = document.getElementById('countdown');
+        if (!el) return;
+        var nextTime = '{{ next_entry.time if next_entry else "" }}';
+        if (!nextTime) { el.textContent = ''; return; }
+        var parts = nextTime.split(':');
+        var now = new Date();
+        var target = new Date(now.getFullYear(), now.getMonth(), now.getDate(),
+            parseInt(parts[0]), parseInt(parts[1]), 0);
+        if (target <= now) { target.setDate(target.getDate() + 1); }
+        var diff = target - now;
+        var h = Math.floor(diff / 3600000);
+        var m = Math.floor((diff % 3600000) / 60000);
+        var s = Math.floor((diff % 60000) / 1000);
+        el.textContent = '(' + h.toString().padStart(2, '0') + ':' + m.toString().padStart(2, '0') + ':' + s.toString().padStart(2, '0') + ')';
+    }
+
+    function toggleAddForm() {
+        var d = document.getElementById('cal-details');
+        if (d) d.open = !d.open;
+    }
+
+    function toggleSourcesPanel() {
+        var panel = document.getElementById('sources-panel');
+        if (!panel) return;
+        var show = panel.style.display !== 'block';
+        panel.style.display = show ? 'block' : 'none';
+        document.getElementById('sources-panel-btn').textContent = show ? 'Ocultar fuentes' : 'Fuentes';
+    }
+
+    function setupDragDrop() {
+        var ul = document.getElementById('cal-list-today');
+        var container = document.getElementById('calendar-list');
+        var dragSrcEl = null;
+        var dragIsSource = false;
+        var dragSourceId = null;
+
+        // Source panel items
+        document.querySelectorAll('.source-panel-item').forEach(function(item) {
+            item.addEventListener('dragstart', function(e) {
+                dragIsSource = true;
+                dragSourceId = this.dataset.sourceId;
+                this.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'copy';
+                e.dataTransfer.setData('text', 'source:' + this.dataset.sourceId);
+            });
+            item.addEventListener('dragend', function(e) {
+                this.classList.remove('dragging');
+                document.querySelectorAll('.drag-over').forEach(function(el){el.classList.remove('drag-over')});
+            });
+        });
+
+        function dropSourceAtEnd(date, sid) {
+            var form = new FormData();
+            form.append('date', date);
+            form.append('source_id', sid);
+            fetch('/api/calendar/add_from_source', { method: 'POST', body: form })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.ok) refreshCalendar();
+                    else showError(data.error || 'Error al anadir desde fuente');
+                });
+        }
+
+        // Allow drops on the container itself (for empty list or append at end)
+        if (container) {
+            container.addEventListener('dragover', function(e) {
+                if (dragIsSource) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }
+            });
+            container.addEventListener('drop', function(e) {
+                if (dragIsSource && dragSourceId) {
+                    e.preventDefault();
+                    dropSourceAtEnd(document.getElementById('cal-date').value, dragSourceId);
+                }
+            });
+        }
+
+        // Allow drops on the empty state placeholder
+        document.querySelectorAll('#calendar-list .empty').forEach(function(el) {
+            el.addEventListener('dragover', function(e) {
+                if (dragIsSource) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }
+            });
+            el.addEventListener('drop', function(e) {
+                if (dragIsSource && dragSourceId) {
+                    e.preventDefault();
+                    dropSourceAtEnd(document.getElementById('cal-date').value, dragSourceId);
+                }
+            });
+        });
+
+        if (!ul) return;
+        var items = ul.querySelectorAll('li[draggable]');
+
+        items.forEach(function(item) {
+            item.addEventListener('dragstart', function(e) {
+                dragSrcEl = this;
+                dragIsSource = false;
+                this.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text', this.dataset.id);
+            });
+            item.addEventListener('dragend', function(e) {
+                this.classList.remove('dragging');
+                document.querySelectorAll('.drag-over').forEach(function(el){el.classList.remove('drag-over')});
+            });
+            item.addEventListener('dragover', function(e) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = dragIsSource ? 'copy' : 'move';
+                document.querySelectorAll('.drag-over').forEach(function(el){el.classList.remove('drag-over')});
+                this.classList.add('drag-over');
+            });
+            item.addEventListener('dragleave', function(e) {
+                this.classList.remove('drag-over');
+            });
+            item.addEventListener('drop', function(e) {
+                e.preventDefault();
+                this.classList.remove('drag-over');
+                var date = document.getElementById('cal-date').value;
+                if (dragIsSource) {
+                    // Drop a source onto calendar entry - insert before this entry
+                    var sid = dragSourceId;
+                    var form = new FormData();
+                    form.append('date', date);
+                    form.append('source_id', sid);
+                    form.append('insert_before', this.dataset.id);
+                    fetch('/api/calendar/add_from_source', { method: 'POST', body: form })
+                        .then(function(r) { return r.json(); })
+                        .then(function(data) {
+                            if (data.ok) {
+                                refreshCalendar();
+                            } else {
+                                showError(data.error || 'Error al anadir desde fuente');
+                            }
+                        });
+                } else if (dragSrcEl && dragSrcEl !== this) {
+                    var all = ul.querySelectorAll('li[draggable]');
+                    var ids = [];
+                    all.forEach(function(li) { ids.push(li.dataset.id); });
+                    var srcIdx = ids.indexOf(dragSrcEl.dataset.id);
+                    var dstIdx = ids.indexOf(this.dataset.id);
+                    if (srcIdx > -1 && dstIdx > -1) {
+                        ids.splice(srcIdx, 1);
+                        ids.splice(dstIdx, 0, dragSrcEl.dataset.id);
+                    }
+                    var form = new FormData();
+                    form.append('date', date);
+                    form.append('ids', ids.join(','));
+                    fetch('/api/calendar/reorder', { method: 'POST', body: form })
+                        .then(function(r) { return r.json(); })
+                        .then(function(data) {
+                            if (data.ok) refreshCalendar();
+                            else showError(data.error || 'Error al reordenar');
+                        });
+                }
+            });
+        });
+    }
+
+    // Init drag drop on page load
+    setupDragDrop();
+
+    if (document.getElementById('countdown')) {
+        setInterval(updateCountdown, 1000);
+        updateCountdown();
+    }
+
+    loadHistory();
+</script>
+
+<div id="football-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:1000; justify-content:center; align-items:flex-start; padding-top:60px;">
+    <div style="background:#1f2937; border-radius:12px; padding:20px; max-width:500px; width:90%; margin:0 auto; max-height:70vh; overflow-y:auto;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h3 style="margin:0; font-size:16px;">⚽ Partidos de hoy</h3>
+            <button onclick="closeFootballModal()" style="background:none; border:none; color:#9ca3af; font-size:20px; cursor:pointer;">✕</button>
+        </div>
+        <div id="football-matches-list" style="font-size:13px;"></div>
+        <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
+            <button class="btn btn-sm" onclick="closeFootballModal()">Cerrar</button>
+            <button class="btn btn-sm btn-primary" id="football-add-btn" onclick="addFootballMatches()" style="display:none;">Añadir todos al calendario</button>
+        </div>
+        <div id="football-result" style="margin-top:8px; font-size:13px; color:#6ee7b7;"></div>
+    </div>
+</div>
+
+<script>
+    var footballMatches = [];
+
+    function fetchFootballMatches() {
+        var modal = document.getElementById('football-modal');
+        var list = document.getElementById('football-matches-list');
+        var addBtn = document.getElementById('football-add-btn');
+        list.innerHTML = '<div style="color:#9ca3af;">Cargando…</div>';
+        addBtn.style.display = 'none';
+        modal.style.display = 'block';
+
+        fetch('/api/football/today')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data.ok) {
+                    list.innerHTML = '<div style="color:#f87171;">Error: ' + (data.error || 'desconocido') + '</div>';
+                    return;
+                }
+                footballMatches = data.matches || [];
+                if (footballMatches.length === 0) {
+                    list.innerHTML = '<div style="color:#9ca3af;">No hay partidos con equipos españoles hoy</div>';
+                    return;
+                }
+                var html = '';
+                footballMatches.forEach(function(m) {
+                    var channels = m.channels && m.channels.length ? m.channels.slice(0,3).join(', ') : '';
+                    html += '<div style="padding:8px 0; border-bottom:1px solid #374151;">'
+                        + '<div style="font-weight:600;">' + m.time + ' | ' + m.title + '</div>'
+                        + '<div style="color:#9ca3af; font-size:12px;">' + m.competition + '</div>'
+                        + (channels ? '<div style="color:#6b7280; font-size:11px;">' + channels + '</div>' : '')
+                        + '</div>';
+                });
+                list.innerHTML = html;
+                addBtn.style.display = 'inline-block';
+            })
+            .catch(function(err) {
+                list.innerHTML = '<div style="color:#f87171;">Error de red: ' + err.message + '</div>';
+            });
+    }
+
+    function closeFootballModal() {
+        document.getElementById('football-modal').style.display = 'none';
+    }
+
+    function addFootballMatches() {
+        var btn = document.getElementById('football-add-btn');
+        var result = document.getElementById('football-result');
+        btn.disabled = true;
+        btn.textContent = 'Añadiendo…';
+        result.textContent = '';
+
+        fetch('/api/football/add_today', { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) {
+                    result.textContent = data.added + ' de ' + data.total + ' partidos añadidos al calendario';
+                    refreshCalendar();
+                } else {
+                    result.style.color = '#f87171';
+                    result.textContent = 'Error: ' + (data.error || 'desconocido');
+                }
+                btn.disabled = false;
+                btn.textContent = 'Añadir todos al calendario';
+            })
+            .catch(function(err) {
+                result.style.color = '#f87171';
+                result.textContent = 'Error de red: ' + err.message;
+                btn.disabled = false;
+                btn.textContent = 'Añadir todos al calendario';
+            });
+    }
+</script>
 </body>
 </html>

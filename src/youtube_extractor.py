@@ -1,13 +1,13 @@
+import logging
 from typing import Any
 from urllib.parse import quote
 
 import yt_dlp
 
-class YouTubeExtractor:
-    """
-    Class to extract information and real stream URLs from a YouTube link.
-    """
+logger = logging.getLogger("youtube_extractor")
 
+
+class StreamExtractor:
     def __init__(self, url: str):
         self.url = url
 
@@ -17,6 +17,7 @@ class YouTubeExtractor:
             "no_warnings": True,
             "skip_download": True,
             "noplaylist": True,
+            "extractor_args": {"generic": ["impersonate"]},
         }
 
         with yt_dlp.YoutubeDL(options) as ydl:
@@ -58,13 +59,34 @@ class YouTubeExtractor:
     def is_hls_url(url: str) -> bool:
         return ".m3u8" in url or "manifest/hls" in url
 
+    def get_metadata(self) -> dict[str, Any]:
+        info = self._extract_info()
+        duration = info.get("duration")
+        is_live = info.get("is_live", False) or info.get("live_status") == "is_live"
+        title = info.get("title", "Sin titulo")
+
+        duration_label = None
+        if duration and not is_live:
+            hours = int(duration // 3600)
+            minutes = int((duration % 3600) // 60)
+            seconds = int(duration % 60)
+            duration_label = f"{hours:02d}:{minutes:02d}:{seconds:02d}" if hours > 0 else f"{minutes:02d}:{seconds:02d}"
+
+        return {
+            "title": title,
+            "duration_seconds": duration if not is_live else None,
+            "duration_label": duration_label if not is_live else "Directo",
+            "is_live": is_live,
+        }
+
     def extract_streams(self) -> list[dict[str, Any]]:
-        """
-        Return a playlist-compatible list with the best HLS stream.
-        """
         return [{
-            "title": "YouTube Live HLS",
+            "title": "Stream HLS",
             "resolution": "Auto",
             "url": self.get_hls_url(),
             "type": "hls",
         }]
+
+
+# Backward compatibility alias
+YouTubeExtractor = StreamExtractor

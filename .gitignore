@@ -1,8 +1,5 @@
-venv/
+data/
+drm/
+sofa.mp4
+*.pyc
 __pycache__/
-*.py[cod]
-output/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.unifymemfile/
