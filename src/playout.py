@@ -445,6 +445,26 @@ class PlayoutEngine:
                     return True
             return False
 
+    def update_calendar_entry(self, cal_id: str, updates: dict) -> bool:
+        with self.lock:
+            for e in self._state["calendar"]:
+                if e["id"] == cal_id:
+                    for key, value in updates.items():
+                        if key not in ("id", "date"):
+                            e[key] = value
+                    if updates.get("time") is not None:
+                        e["time_locked"] = bool(updates.get("time"))
+                    self._save()
+                    break
+            else:
+                return False
+        if updates.get("time") is not None or updates.get("duration_seconds") is not None:
+            for e in self._state["calendar"]:
+                if e["id"] == cal_id:
+                    self.recalculate_calendar_day(e.get("date", ""))
+                    break
+        return True
+
     def reset_calendar_status(self, cal_id: str) -> bool:
         with self.lock:
             for e in self._state["calendar"]:

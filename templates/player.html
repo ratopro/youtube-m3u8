@@ -375,6 +375,7 @@
                         {% if e.enabled %}
                             <button class="btn btn-sm btn-success" onclick="playNow('{{ e.id }}')">Emitir</button>
                         {% endif %}
+                        <button class="btn btn-sm" onclick="editCal('{{ e.id }}')">Editar</button>
                         <button class="btn btn-sm" onclick="toggleCal('{{ e.id }}')">
                             {{ 'Desactivar' if e.enabled else 'Activar' }}
                         </button>
@@ -423,6 +424,36 @@
                 </div>
             </div>
         </div>
+
+        <div class="modal-overlay" id="edit-cal-modal" style="display:none;" onclick="if(event.target===this)closeEditModal()">
+            <div class="modal-content" style="max-width:350px;">
+                <h3 style="margin:0 0 12px; font-size:15px;">Editar programa</h3>
+                <div class="input-row" style="margin-bottom:8px;">
+                    <input type="time" id="edit-cal-time">
+                    <button class="btn btn-sm" onclick="openEditClockModal()" style="min-width:40px;">🕐</button>
+                </div>
+                <div class="input-row" style="margin-bottom:8px;">
+                    <input type="text" id="edit-cal-title" placeholder="Titulo">
+                </div>
+                <div class="input-row" style="margin-bottom:8px;">
+                    <select id="edit-cal-source-id">
+                        <option value="">-- Mantener fuente actual --</option>
+                        {% for s in sources %}
+                        <option value="{{ s.id }}">{{ s.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <label style="font-size:14px; color:#9ca3af; display:flex; align-items:center; gap:6px; cursor:pointer; margin-bottom:12px;">
+                    <input type="checkbox" id="edit-cal-no-time" onchange="toggleEditNoTime()">
+                    Sin hora de inicio (despues del anterior)
+                </label>
+                <div class="modal-actions">
+                    <button class="btn btn-sm" onclick="closeEditModal()">Cancelar</button>
+                    <button class="btn btn-sm btn-primary" onclick="saveEditCal()">Guardar</button>
+                </div>
+                <div id="edit-cal-result" style="margin-top:8px; font-size:13px;"></div>
+            </div>
+        </div>
         <script>
         document.getElementById('cal-details').addEventListener('toggle', function() {
             if (this.open) {
@@ -459,6 +490,11 @@
             btn.disabled = cb.checked;
         }
         function openClockModal() {
+            openClockPickerForId('cal-time');
+        }
+        var _clockTargetId = null;
+        function openClockPickerForId(targetId) {
+            _clockTargetId = targetId;
             var modal = document.getElementById('clock-modal');
             var hCol = document.getElementById('clock-hours');
             var mCol = document.getElementById('clock-minutes');
@@ -504,7 +540,11 @@
             var h = document.querySelector('#clock-hours .selected');
             var m = document.querySelector('#clock-minutes .selected');
             if (h && m) {
-                document.getElementById('cal-time').value = h.dataset.value + ':' + m.dataset.value;
+                var val = h.dataset.value + ':' + m.dataset.value;
+                if (_clockTargetId) {
+                    document.getElementById(_clockTargetId).value = val;
+                }
+                document.getElementById('cal-time').value = val;
             }
             closeClockModal();
         }
@@ -649,6 +689,7 @@
                         + statusTag
                         + '<div class="actions">'
                         + playBtn
+                        + '<button class="btn btn-sm" onclick="editCal(\'' + e.id + '\')">Editar</button>'
                         + '<button class="btn btn-sm" onclick="toggleCal(\'' + e.id + '\')">' + toggleLabel + '</button>'
                         + '<button class="btn btn-sm btn-danger" onclick="deleteCal(\'' + e.id + '\')">Eliminar</button>'
                         + '</div>'
@@ -745,6 +786,87 @@
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 if (data.ok) location.reload();
+            });
+    }
+
+    var editCalId = null;
+
+    function editCal(id) {
+        editCalId = id;
+        var form = new FormData();
+        form.append('date', document.getElementById('cal-date').value);
+        fetch('/api/calendar', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var entry = null;
+                (data.entries || []).forEach(function(e) {
+                    if (e.id === id) entry = e;
+                });
+                if (!entry) { showError('Programa no encontrado'); return; }
+                document.getElementById('edit-cal-time').value = entry.time || '';
+                document.getElementById('edit-cal-title').value = entry.title || '';
+                document.getElementById('edit-cal-source-id').value = '';
+                var noTime = entry.start_mode === 'after_previous';
+                document.getElementById('edit-cal-no-time').checked = noTime;
+                toggleEditNoTime();
+                document.getElementById('edit-cal-result').textContent = '';
+                document.getElementById('edit-cal-modal').style.display = 'block';
+            })
+            .catch(function(err) {
+                showError('Error al cargar: ' + err.message);
+            });
+    }
+
+    function closeEditModal() {
+        document.getElementById('edit-cal-modal').style.display = 'none';
+        editCalId = null;
+    }
+
+    function toggleEditNoTime() {
+        var checked = document.getElementById('edit-cal-no-time').checked;
+        document.getElementById('edit-cal-time').disabled = checked;
+        document.getElementById('edit-cal-time').style.opacity = checked ? '0.5' : '1';
+    }
+
+    function openEditClockModal() {
+        var timeInput = document.getElementById('edit-cal-time');
+        if (timeInput.disabled) return;
+        openClockPickerForId('edit-cal-time');
+    }
+
+    function saveEditCal() {
+        if (!editCalId) return;
+        var form = new FormData();
+        form.append('cal_id', editCalId);
+        var timeVal = document.getElementById('edit-cal-time').value.trim();
+        var noTime = document.getElementById('edit-cal-no-time').checked;
+        var title = document.getElementById('edit-cal-title').value.trim();
+        var sourceId = document.getElementById('edit-cal-source-id').value;
+        if (noTime) {
+            form.append('start_mode', 'after_previous');
+        } else if (timeVal) {
+            form.append('time', timeVal);
+        }
+        if (title) form.append('title', title);
+        if (sourceId) form.append('source_id', sourceId);
+
+        var result = document.getElementById('edit-cal-result');
+        result.textContent = 'Guardando…';
+
+        fetch('/api/calendar/update', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) {
+                    closeEditModal();
+                    refreshCalendar();
+                } else {
+                    result.style.color = '#f87171';
+                    result.textContent = data.error || 'Error al guardar';
+                }
+            })
+            .catch(function(err) {
+                result.style.color = '#f87171';
+                result.textContent = 'Error de red: ' + err.message;
             });
     }
 

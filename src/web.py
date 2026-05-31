@@ -1313,6 +1313,30 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         ok = playout.delete_calendar_entry(cal_id)
         return jsonify({"ok": ok})
 
+    @app.route("/api/calendar/update", methods=["POST"])
+    def api_update_calendar():
+        cal_id = request.form.get("cal_id", "").strip()
+        if not cal_id:
+            return jsonify({"ok": False, "error": "cal_id requerido"})
+        updates = {}
+        time_val = request.form.get("time", "").strip()
+        title = request.form.get("title", "").strip()
+        source_id = request.form.get("source_id", "").strip()
+        start_mode = request.form.get("start_mode", "").strip()
+        if title:
+            updates["title"] = title
+        if source_id:
+            updates["source_id"] = source_id
+        if start_mode:
+            updates["start_mode"] = start_mode
+        if start_mode == "after_previous":
+            updates["time"] = ""
+            updates["time_locked"] = False
+        elif time_val:
+            updates["time"] = time_val
+        ok = playout.update_calendar_entry(cal_id, updates)
+        return jsonify({"ok": ok})
+
     @app.route("/api/calendar/toggle", methods=["POST"])
     def api_toggle_calendar():
         cal_id = request.form.get("cal_id", "").strip()
