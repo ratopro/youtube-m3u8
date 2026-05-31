@@ -102,6 +102,20 @@
             .input-row input { min-width: 0; }
             .url-cell { max-width: none; }
         }
+
+        .pagination {
+            display: flex; gap: 4px; justify-content: center; align-items: center;
+            margin-top: 12px; flex-wrap: wrap;
+        }
+        .pagination .page-btn {
+            background: #374151; border: 1px solid #4b5563; border-radius: 6px;
+            color: #d1d5db; cursor: pointer; font-size: 13px; padding: 4px 10px;
+            min-width: 32px; text-align: center; transition: background 0.15s;
+        }
+        .pagination .page-btn:hover { background: #4b5563; }
+        .pagination .page-btn.active { background: #2563eb; border-color: #2563eb; color: #fff; }
+        .pagination .page-btn:disabled { opacity: 0.4; cursor: default; }
+        .pagination .page-info { color: #9ca3af; font-size: 13px; margin: 0 8px; }
     </style>
 </head>
 <body>
@@ -113,76 +127,6 @@
     </div>
 
     <div id="messages"></div>
-
-    <div class="card">
-        <div class="section-header" style="display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap;">
-            <h3 style="margin:0;">Todas las fuentes</h3>
-            <button class="btn btn-sm" onclick="refreshPage()">Recargar</button>
-        </div>
-        {% if sources %}
-        <div style="overflow-x:auto;">
-        <table>
-            <thead>
-                <tr>
-                    <th>Tipo</th>
-                    <th>Nombre</th>
-                    <th>URL</th>
-                    <th>Duracion</th>
-                    <th>Auto</th>
-                    <th>Val.</th>
-                    <th>Acciones</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for s in sources %}
-                <tr>
-                    <td><span class="source-type {{ s.type }}">{{ s.type }}</span></td>
-                    <td data-label="Nombre">{{ s.name }}</td>
-                    <td data-label="URL" class="url-cell">{{ s.url }}</td>
-                    <td data-label="Duracion">
-                        {% if s.duration_label %}
-                            <span class="tag duration">{{ s.duration_label }}</span>
-                        {% else %}
-                            <span style="color:#6b7280;">-</span>
-                        {% endif %}
-                    </td>
-                    <td data-label="Auto">
-                        <span class="tag {{ 'auto-yes' if s.auto_enabled else 'auto-no' }}"
-                              onclick="toggleAuto('{{ s.id }}')" style="cursor:pointer;">
-                            {{ 'ON' if s.auto_enabled else 'OFF' }}
-                        </span>
-                    </td>
-                    <td data-label="Val.">
-                        {% if s.validation %}
-                            <span class="tag {{ 'ok' if s.validation.status == 'ok' else 'err' }}">
-                                {{ 'OK' if s.validation.status == 'ok' else 'ERR' }}
-                            </span>
-                        {% else %}
-                            <span class="tag pending">-</span>
-                        {% endif %}
-                    </td>
-                    <td data-label="Acciones">
-                        <div class="actions">
-                            <button class="btn btn-sm" onclick="probeSource('{{ s.id }}')">Probar</button>
-                            <button class="btn btn-sm" onclick="editSource('{{ s.id }}')">Editar</button>
-                            <button class="btn btn-sm btn-danger" onclick="deleteSource('{{ s.id }}')">Eliminar</button>
-                        </div>
-                        <div class="inlined-form" id="edit-form-{{ s.id }}">
-                            <input type="text" id="edit-name-{{ s.id }}" value="{{ s.name }}" placeholder="Nombre">
-                            <input type="url" id="edit-url-{{ s.id }}" value="{{ s.url }}" placeholder="URL">
-                            <button class="btn btn-sm btn-success" onclick="saveEdit('{{ s.id }}')">Guardar</button>
-                            <button class="btn btn-sm" onclick="cancelEdit('{{ s.id }}')">Cancelar</button>
-                        </div>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        </div>
-        {% else %}
-            <div class="empty">No hay fuentes anadidas. Usa los formularios de abajo para anadir.</div>
-        {% endif %}
-    </div>
 
     <div style="display:grid; gap:16px; grid-template-columns:1fr 1fr;">
         <div class="card">
@@ -230,9 +174,155 @@
             <div id="iptv-import-result" style="margin-top:8px; font-size:13px;"></div>
         </div>
     </div>
+
+    <div class="card" id="sources-card">
+        <div class="section-header" style="display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap;">
+            <h3 style="margin:0;">Todas las fuentes</h3>
+            <span id="source-count" style="font-size:13px; color:#9ca3af;"></span>
+            <div style="margin-left:auto; display:flex; gap:6px;">
+                <select id="source-group-filter" onchange="applyFilters()" style="background:#030712; border:1px solid #4b5563; border-radius:6px; color:#fff; font-size:13px; padding:6px 10px;">
+                    <option value="">Todos los grupos</option>
+                </select>
+                <button class="btn btn-sm" onclick="refreshPage()">Recargar</button>
+            </div>
+        </div>
+        <div style="overflow-x:auto;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Tipo</th>
+                    <th>Nombre</th>
+                    <th>Grupo</th>
+                    <th>URL</th>
+                    <th>Duracion</th>
+                    <th>Auto</th>
+                    <th>Val.</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody id="sources-tbody">
+            </tbody>
+        </table>
+        </div>
+        <div class="pagination" id="pagination"></div>
+    </div>
 </main>
 
 <script>
+    var SOURCES = {{ sources | tojson }};
+    var PAGE_SIZE = 15;
+    var currentPage = 0;
+
+    function buildGroupFilter() {
+        var sel = document.getElementById('source-group-filter');
+        var groups = {};
+        SOURCES.forEach(function(s) {
+            var g = s.iptv_group || s.type || 'otro';
+            groups[g] = (groups[g] || 0) + 1;
+        });
+        Object.keys(groups).sort().forEach(function(g) {
+            var opt = document.createElement('option');
+            opt.value = g;
+            opt.textContent = g + ' (' + groups[g] + ')';
+            sel.appendChild(opt);
+        });
+    }
+
+    function getFiltered() {
+        var filter = document.getElementById('source-group-filter').value;
+        if (!filter) return SOURCES;
+        return SOURCES.filter(function(s) {
+            return (s.iptv_group || s.type || 'otro') === filter;
+        });
+    }
+
+    function renderPage() {
+        var filtered = getFiltered();
+        var total = filtered.length;
+        var pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+        if (currentPage >= pages) currentPage = pages - 1;
+        var start = currentPage * PAGE_SIZE;
+        var pageData = filtered.slice(start, start + PAGE_SIZE);
+
+        document.getElementById('source-count').textContent = total + ' fuente(s)';
+
+        var tbody = document.getElementById('sources-tbody');
+        if (pageData.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" class="empty">No hay fuentes</td></tr>';
+            document.getElementById('pagination').innerHTML = '';
+            return;
+        }
+        var html = '';
+        pageData.forEach(function(s) {
+            var typeClass = s.type === 'youtube' ? 'yt' : s.type;
+            var durHtml = s.duration_label ? '<span class="tag duration">' + escapeHtml(s.duration_label) + '</span>' : '<span style="color:#6b7280;">-</span>';
+            var autoClass = s.auto_enabled ? 'auto-yes' : 'auto-no';
+            var autoLabel = s.auto_enabled ? 'ON' : 'OFF';
+            var valHtml = s.validation
+                ? '<span class="tag ' + (s.validation.status === 'ok' ? 'ok' : 'err') + '">' + (s.validation.status === 'ok' ? 'OK' : 'ERR') + '</span>'
+                : '<span class="tag pending">-</span>';
+            var group = s.iptv_group || s.type || '-';
+            html += '<tr>'
+                + '<td><span class="source-type ' + typeClass + '">' + escapeHtml(s.type) + '</span></td>'
+                + '<td data-label="Nombre">' + escapeHtml(s.name) + '</td>'
+                + '<td data-label="Grupo" style="font-size:12px; color:#9ca3af;">' + escapeHtml(group) + '</td>'
+                + '<td data-label="URL" class="url-cell">' + escapeHtml(s.url) + '</td>'
+                + '<td data-label="Duracion">' + durHtml + '</td>'
+                + '<td data-label="Auto"><span class="tag ' + autoClass + '" onclick="toggleAuto(\'' + s.id + '\')" style="cursor:pointer;">' + autoLabel + '</span></td>'
+                + '<td data-label="Val.">' + valHtml + '</td>'
+                + '<td data-label="Acciones">'
+                + '<div class="actions">'
+                + '<button class="btn btn-sm" onclick="probeSource(\'' + s.id + '\')">Probar</button>'
+                + '<button class="btn btn-sm" onclick="editSource(\'' + s.id + '\')">Editar</button>'
+                + '<button class="btn btn-sm btn-danger" onclick="deleteSource(\'' + s.id + '\')">Eliminar</button>'
+                + '</div>'
+                + '<div class="inlined-form" id="edit-form-' + s.id + '">'
+                + '<input type="text" id="edit-name-' + s.id + '" value="' + escapeHtml(s.name) + '" placeholder="Nombre">'
+                + '<input type="url" id="edit-url-' + s.id + '" value="' + escapeHtml(s.url) + '" placeholder="URL">'
+                + '<button class="btn btn-sm btn-success" onclick="saveEdit(\'' + s.id + '\')">Guardar</button>'
+                + '<button class="btn btn-sm" onclick="cancelEdit(\'' + s.id + '\')">Cancelar</button>'
+                + '</div>'
+                + '</td>'
+                + '</tr>';
+        });
+        tbody.innerHTML = html;
+        renderPagination(pages);
+    }
+
+    function renderPagination(pages) {
+        var el = document.getElementById('pagination');
+        if (pages <= 1) { el.innerHTML = ''; return; }
+        var html = '';
+        html += '<button class="page-btn" onclick="goPage(0)"' + (currentPage === 0 ? ' disabled' : '') + '>««</button>';
+        html += '<button class="page-btn" onclick="goPage(' + (currentPage - 1) + ')"' + (currentPage === 0 ? ' disabled' : '') + '>«</button>';
+        var start = Math.max(0, currentPage - 3);
+        var end = Math.min(pages, currentPage + 4);
+        for (var i = start; i < end; i++) {
+            html += '<button class="page-btn' + (i === currentPage ? ' active' : '') + '" onclick="goPage(' + i + ')">' + (i + 1) + '</button>';
+        }
+        html += '<button class="page-btn" onclick="goPage(' + (currentPage + 1) + ')"' + (currentPage >= pages - 1 ? ' disabled' : '') + '>»</button>';
+        html += '<button class="page-btn" onclick="goPage(' + (pages - 1) + ')"' + (currentPage >= pages - 1 ? ' disabled' : '') + '>»»</button>';
+        html += '<span class="page-info">' + (currentPage + 1) + ' / ' + pages + '</span>';
+        el.innerHTML = html;
+    }
+
+    function goPage(n) {
+        currentPage = n;
+        renderPage();
+    }
+
+    function applyFilters() {
+        currentPage = 0;
+        renderPage();
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        var d = document.createElement('div');
+        d.textContent = text;
+        return d.innerHTML;
+    }
+
     function showMsg(text, isError) {
         var el = document.getElementById('messages');
         el.innerHTML = '<div class="' + (isError ? 'error-msg' : 'success-msg') + '">' + text + '</div>';
@@ -400,6 +490,8 @@
                 result.innerHTML = '<div class="error-msg">Error de red: ' + err.message + '</div>';
             });
     }
-</script>
+
+    buildGroupFilter();
+    renderPage();
 </body>
 </html>
