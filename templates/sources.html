@@ -42,7 +42,7 @@
         .btn-danger:hover { background: #b91c1c; }
         .btn-success { background: #16a34a; border-color: #16a34a; }
         .btn-success:hover { background: #15803d; }
-        .btn-sm { padding: 6px 12px; font-size: 13px; }
+        .btn-sm { padding: 4px 8px; font-size: 12px; }
 
         .input-row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
         .input-row input, .input-row select {
@@ -62,6 +62,7 @@
         .source-type.yt { background: #7c3aed; }
         .source-type.iptv { background: #0891b2; }
         .source-type.hls { background: #d97706; }
+        .source-type.xtream { background: #059669; }
         .source-type.presentation { background: #6b7280; }
 
         .tag { font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: 600; white-space: nowrap; }
@@ -72,7 +73,7 @@
         .tag.pending { background: #1e3a5f; color: #93c5fd; }
         .tag.duration { background: #374151; color: #fbbf24; }
 
-        .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+        .actions { display: flex; gap: 4px; flex-wrap: nowrap; white-space: nowrap; }
         .empty { color: #6b7280; font-size: 13px; padding: 24px 0; text-align: center; }
         .error-msg {
             background: #7f1d1d; border: 1px solid #ef4444; border-radius: 8px;
@@ -179,10 +180,20 @@
         <div class="section-header" style="display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap;">
             <h3 style="margin:0;">Todas las fuentes</h3>
             <span id="source-count" style="font-size:13px; color:#9ca3af;"></span>
-            <div style="margin-left:auto; display:flex; gap:6px;">
+            <div style="margin-left:auto; display:flex; gap:6px; flex-wrap:wrap;">
+                <input type="text" id="source-name-filter" oninput="applyFilters()" placeholder="Buscar canal por nombre..." style="background:#030712; border:1px solid #4b5563; border-radius:6px; color:#fff; font-size:13px; padding:6px 10px; width:200px;">
+                <select id="source-type-filter" onchange="applyFilters()" style="background:#030712; border:1px solid #4b5563; border-radius:6px; color:#fff; font-size:13px; padding:6px 10px;">
+                    <option value="">Todos los tipos</option>
+                    <option value="youtube">YouTube</option>
+                    <option value="hls">HLS</option>
+                    <option value="iptv">IPTV</option>
+                    <option value="xtream">Xtream</option>
+                    <option value="presentation">Presentación</option>
+                </select>
                 <select id="source-group-filter" onchange="applyFilters()" style="background:#030712; border:1px solid #4b5563; border-radius:6px; color:#fff; font-size:13px; padding:6px 10px;">
                     <option value="">Todos los grupos</option>
                 </select>
+                <input type="text" id="source-search" oninput="applyFilters()" placeholder="Buscar en fuentes..." style="background:#030712; border:1px solid #4b5563; border-radius:6px; color:#fff; font-size:13px; padding:6px 10px; width:170px;">
                 <button class="btn btn-sm" onclick="refreshPage()">Recargar</button>
             </div>
         </div>
@@ -229,10 +240,19 @@
     }
 
     function getFiltered() {
-        var filter = document.getElementById('source-group-filter').value;
-        if (!filter) return SOURCES;
+        var groupFilter = document.getElementById('source-group-filter').value;
+        var typeFilter = document.getElementById('source-type-filter').value;
+        var nameFilter = document.getElementById('source-name-filter').value.toLowerCase().trim();
+        var searchText = document.getElementById('source-search').value.toLowerCase().trim();
         return SOURCES.filter(function(s) {
-            return (s.iptv_group || s.type || 'otro') === filter;
+            if (groupFilter && (s.iptv_group || s.type || 'otro') !== groupFilter) return false;
+            if (typeFilter && s.type !== typeFilter) return false;
+            if (nameFilter && s.name.toLowerCase().indexOf(nameFilter) === -1) return false;
+            if (searchText) {
+                var haystack = (s.name + ' ' + s.url + ' ' + (s.iptv_group || '') + ' ' + s.type).toLowerCase();
+                if (haystack.indexOf(searchText) === -1) return false;
+            }
+            return true;
         });
     }
 
@@ -493,5 +513,6 @@
 
     buildGroupFilter();
     renderPage();
+</script>
 </body>
 </html>
