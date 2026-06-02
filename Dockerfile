@@ -12,6 +12,7 @@ RUN apt-get update \
         ca-certificates \
         curl \
         ffmpeg \
+        gosu \
         nodejs \
         tzdata \
     && rm -rf /var/lib/apt/lists/* \
@@ -28,13 +29,16 @@ COPY templates ./templates
 COPY drm ./drm
 
 RUN useradd --create-home --uid 10001 appuser \
+    && mkdir -p /app/data \
     && chown -R appuser:appuser /app
 
-USER appuser
+COPY --chown=root:root entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 EXPOSE 5000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
     CMD curl -fsS http://127.0.0.1:5000/health >/dev/null || exit 1
 
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["python", "app.py", "--host", "0.0.0.0", "--port", "5000"]
