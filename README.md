@@ -31,36 +31,54 @@ python3 -m venv venv
 
 ## Uso con Docker
 
-Construir y arrancar el contenedor:
+### Opcion A: imagen publicada en Docker Hub (recomendado)
 
 ```bash
-docker compose up --build
+mkdir -p youtube-m3u8/data
+cd youtube-m3u8
+curl -fsSL https://raw.githubusercontent.com/ratopro/youtube-m3u8/main/deploy/config.example.json -o data/config.json
+docker run -d --name youtube-hls --restart unless-stopped \
+  -p 5058:5000 \
+  -e TZ=Europe/Madrid \
+  -e APP_TZ=Europe/Madrid \
+  -v "$(pwd)/data:/app/data" \
+  ratopro/youtube-m3u8:latest
+```
+
+Abre `http://localhost:5058` y, si quieres, edita `data/config.json` con tus credenciales Xtream (el contenedor se reinicia automaticamente al recargar `data/state.json` solo si reinicias el contenedor).
+
+Para parar y eliminar el contenedor:
+
+```bash
+docker stop youtube-hls && docker rm youtube-hls
+```
+
+Para actualizar a la ultima imagen:
+
+```bash
+docker pull ratopro/youtube-m3u8:latest
+docker stop youtube-hls && docker rm youtube-hls
+docker run -d --name youtube-hls --restart unless-stopped \
+  -p 5058:5000 \
+  -e TZ=Europe/Madrid \
+  -e APP_TZ=Europe/Madrid \
+  -v "$(pwd)/data:/app/data" \
+  ratopro/youtube-m3u8:latest
+```
+
+### Opcion B: construir localmente
+
+```bash
+git clone https://github.com/ratopro/youtube-m3u8.git
+cd youtube-m3u8
+cp deploy/config.example.json data/config.json
+docker compose up -d --build
 ```
 
 El directo quedara disponible en:
 
 ```text
 http://localhost:5058
-```
-
-En esa pagina pega la URL del directo y pulsa `Conectar`. La playlist para reproductores queda en:
-
-```text
-http://localhost:5058/live.m3u8
-```
-
-Opcionalmente puedes arrancar el contenedor con una URL inicial:
-
-```bash
-YOUTUBE_URL="https://www.youtube.com/live/5P4kxc5bnO8?si=QkuzMRXdGD_tnRQ0" docker compose up --build
-```
-
-Tambien puedes usar `docker run`:
-
-```bash
-docker build -t youtube-hls .
-docker run --rm -p 5058:5000 \
-  youtube-hls
 ```
 
 ## Emby

@@ -1,0 +1,22 @@
+{
+  "iptv_providers": [
+    {
+      "id": "mi_proveedor",
+      "name": "Mi Proveedor Xtream",
+      "dns": "http://panel.example.com:8080",
+      "dns_alt": "http://panel-alt.example.com:8080",
+      "username": "USER",
+      "password": "PASS",
+      "categories": {
+        "86": "Entretenimiento",
+        "87": "Documentales",
+        "88": "General",
+        "89": "Cine",
+        "90": "Deportes",
+        "600": "Infantil",
+        "601": "Musica",
+        "410": "24/7"
+      }
+    }
+  ]
+}
