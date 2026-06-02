@@ -988,17 +988,26 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         upstream_is_hls = bool(upstream_url and StreamExtractor.is_hls_url(upstream_url))
         upstream_is_direct = bool(upstream_url and not upstream_is_hls)
         emby_preview_url = "/emby/processed/live.m3u8" if processed_enabled else "/emby/live.m3u8"
+        current_mode = stream_state["mode"]
+        playback_url = None
+        is_hls_flag = False
+        is_direct_mp4 = False
+        if current_mode == "presentation":
+            playback_url = "/presentation.mp4"
+            is_direct_mp4 = True
+        elif current_mode:
+            playback_url = emby_preview_url
+            is_hls_flag = True
 
         response = no_store(Response(render_template(
             "player.html",
             app_version=app_version,
-            playlist_url="/live.m3u8" if stream_state["mode"] else None,
-            playback_url=(
-                emby_preview_url if stream_state["mode"] else None
-            ),
-            is_hls=bool(stream_state["mode"]),
+            playlist_url="/live.m3u8" if current_mode else None,
+            playback_url=playback_url,
+            is_hls=is_hls_flag,
             is_direct_ts=upstream_is_direct,
-            mode=stream_state["mode"],
+            is_direct_mp4=is_direct_mp4,
+            mode=current_mode,
             source_url=redact_url(stream_state["source_url"]),
             source_url_name=stream_state.get("source_url_name"),
             error=stream_state["error"],

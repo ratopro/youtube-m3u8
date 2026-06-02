@@ -794,12 +794,18 @@
         var playbackUrl = '{{ playback_url }}';
         var isHls = {{ 'true' if is_hls else 'false' }};
         var isDirectTs = {{ 'true' if is_direct_ts else 'false' }};
+        var isDirectMp4 = {{ 'true' if is_direct_mp4 else 'false' }};
 
         if (!playbackUrl || playbackUrl === 'None') return;
 
         teardownPreviewPlayers();
 
-        if (isHls) {
+        if (isDirectMp4) {
+            previewVideo.src = playbackUrl;
+            previewVideo.loop = true;
+            previewVideo.muted = true;
+            previewVideo.play().catch(function() {});
+        } else if (isHls) {
             if (previewVideo.canPlayType('application/vnd.apple.mpegurl')) {
                 previewVideo.src = playbackUrl;
             } else if (window.Hls && Hls.isSupported()) {
@@ -815,7 +821,7 @@
             tsPlayer.attachMediaElement(previewVideo);
             tsPlayer.load();
             previewVideo.play().catch(function() {});
-        } else if (!isHls) {
+        } else {
             previewVideo.src = playbackUrl;
             previewVideo.play().catch(function() {});
         }
