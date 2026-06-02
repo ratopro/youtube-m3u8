@@ -7,6 +7,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from src.timeutils import now, now_date, now_hm, now_iso
+
 
 def _add_time(time_str: str, duration_seconds: int | None) -> str | None:
     if not time_str or not duration_seconds:
@@ -114,7 +116,7 @@ class PlayoutEngine:
                 "type": "presentation",
                 "url": "",
                 "auto_enabled": True,
-                "created_at": datetime.now().isoformat(),
+                "created_at": now_iso(),
                 "duration_label": "Directo",
                 "is_live": True,
             })
@@ -140,71 +142,95 @@ class PlayoutEngine:
         cal_id = None
 
         with self.lock:
-            today = datetime.now().strftime("%Y-%m-%d")
-            now_time = datetime.now().strftime("%H:%M")
+            today = now_date()
+            now_time = now_hm()
 
-            # Sweep past time-based entries that are still pending
+            # 1) Mark past time-based entries as played only if they're finished
             for entry in self._state["calendar"]:
-                entry_time = entry.get("time", "")
                 if (
-                    entry["date"] == today
+                    entry.get("date") == today
                     and entry.get("start_mode", "time") == "time"
-                    and entry_time
-                    and entry_time < now_time
                     and entry.get("status") != "played"
                     and entry.get("enabled", True)
                 ):
-                    entry["status"] = "played"
-                    source = self._find_source(entry.get("source_id", ""))
-                    self.add_history_entry({
-                        "timestamp": datetime.now().isoformat(),
-                        "source_id": entry.get("source_id", ""),
-                        "source_name": entry.get("title", ""),
-                        "source_type": source["type"] if source else "calendar",
-                        "reason": "time_passed",
-                        "calendar_id": entry["id"],
-                        "success": False,
-                        "error": "Horario vencido",
-                    })
+                    entry_time = entry.get("time", "")
+                    end_time = entry.get("end_time") or ""
+                    has_started = bool(entry_time) and entry_time <= now_time
+                    has_ended = bool(end_time) and end_time <= now_time
+                    if has_ended:
+                        entry["status"] = "played"
+                        source = self._find_source(entry.get("source_id", ""))
+                        self.add_history_entry({
+                            "timestamp": now_iso(),
+                            "source_id": entry.get("source_id", ""),
+                            "source_name": entry.get("title", ""),
+                            "source_type": source["type"] if source else "calendar",
+                            "reason": "time_passed",
+                            "calendar_id": entry["id"],
+                            "success": False,
+                            "error": "Horario vencido",
+                        })
             self._save()
 
             current = self.callbacks.get("get_stream_state", lambda: {})()
             current_cal_id = current.get("current_calendar_id")
             current_mode = current.get("mode")
 
-            # Cut current program if its end_time has passed
-            if current_cal_id and current_mode:
+            # 2) If we already have a stream, check if its calendar entry is still current
+            current_entry = None
+            if current_cal_id:
                 for entry in self._state["calendar"]:
-                    if entry["id"] == current_cal_id and entry.get("end_time") and entry["end_time"] <= now_time:
-                        entry["status"] = "played"
-                        self._save()
-                        source_to_activate = None
-                        reason = None
-                        cal_id = None
-                        current_cal_id = None
+                    if entry["id"] == current_cal_id:
+                        current_entry = entry
+                        break
+            if current_entry and current_entry.get("end_time") and current_entry["end_time"] <= now_time:
+                current_entry["status"] = "played"
+                self._save()
+                current_entry = None
+                current_cal_id = None
+
+            # 3) Resume the in-progress program on startup or after errors
+            in_progress = None
+            for entry in self._state["calendar"]:
+                if (
+                    entry.get("date") == today
+                    and entry.get("start_mode", "time") == "time"
+                    and entry.get("enabled", True)
+                ):
+                    entry_time = entry.get("time", "")
+                    if not entry_time:
+                        continue
+                    started = entry_time <= now_time
+                    end_time = entry.get("end_time") or ""
+                    ended = bool(end_time) and end_time <= now_time
+                    if started and not ended:
+                        in_progress = entry
+                        if entry.get("status") == "played":
+                            entry["status"] = "pending"
                         break
 
-            if not source_to_activate and current_cal_id is not None:
-                source_to_activate = None
-
-            # Time-based calendar
-            if not source_to_activate:
+            # Fallback: today's first pending/disabled entry without a clear end
+            if not in_progress:
                 for entry in self._state["calendar"]:
                     if (
-                        entry["date"] == today
+                        entry.get("date") == today
                         and entry.get("start_mode", "time") == "time"
-                        and entry["time"] <= now_time
                         and entry.get("enabled", True)
-                        and entry.get("status") != "played"
+                        and entry.get("time", "")
+                        and not entry.get("end_time")
                     ):
-                        source = self._find_source(entry["source_id"])
-                        if source:
-                            source_to_activate = source
-                            reason = "calendar"
-                            cal_id = entry["id"]
-                            entry["status"] = "played"
-                            self._save()
+                        in_progress = entry
+                        if entry.get("status") == "played":
+                            entry["status"] = "pending"
                         break
+
+            if in_progress and (not current_entry or current_entry["id"] != in_progress["id"]):
+                source = self._find_source(in_progress["source_id"])
+                if source:
+                    source_to_activate = source
+                    reason = "calendar_resume" if current_entry else "calendar_start"
+                    cal_id = in_progress["id"]
+                    self._save()
 
         if source_to_activate:
             activate = self.callbacks.get("activate_source")
@@ -245,8 +271,8 @@ class PlayoutEngine:
             if self._state.get("auto_enabled") and not current.get("mode"):
                 # Check if there's a future scheduled program; if so, auto fills until then
                 next_scheduled = None
-                today = datetime.now().strftime("%Y-%m-%d")
-                now_time = datetime.now().strftime("%H:%M")
+                today = now_date()
+                now_time = now_hm()
                 for e in self._state["calendar"]:
                     if e["date"] == today and e.get("start_mode", "time") == "time" and e["time"] > now_time and e.get("enabled", True) and e.get("status") != "played":
                         next_scheduled = e["time"]
@@ -344,7 +370,7 @@ class PlayoutEngine:
                 n += 1
                 src_id = f"src_{n}"
             source["id"] = src_id
-            source["created_at"] = datetime.now().isoformat()
+            source["created_at"] = now_iso()
             source.setdefault("auto_enabled", True)
             source.setdefault("emit_enabled", False)
             self._state["sources"].append(source)
@@ -538,7 +564,7 @@ class PlayoutEngine:
 
     def find_next_after_previous(self) -> tuple[dict, str] | None:
         with self.lock:
-            today = datetime.now().strftime("%Y-%m-%d")
+            today = now_date()
             for entry in self._state["calendar"]:
                 if (
                     entry["date"] == today
@@ -553,8 +579,8 @@ class PlayoutEngine:
 
     def has_upcoming_calendar(self) -> bool:
         with self.lock:
-            today = datetime.now().strftime("%Y-%m-%d")
-            now_time = datetime.now().strftime("%H:%M")
+            today = now_date()
+            now_time = now_hm()
             for e in self._state["calendar"]:
                 if e["date"] == today and e.get("start_mode", "time") == "time" and e["time"] > now_time and e.get("enabled", True) and e.get("status") != "played":
                     return True
@@ -620,7 +646,7 @@ class PlayoutEngine:
                     s["validation"] = {
                         "status": status,
                         "error": error,
-                        "checked_at": datetime.now().isoformat(),
+                        "checked_at": now_iso(),
                     }
                     self._save()
                     return True

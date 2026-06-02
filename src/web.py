@@ -1,13 +1,17 @@
 import hashlib
+import hmac
+import ipaddress
 import math
 import os
 import re
+import secrets
+import socket
 import subprocess
 import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, urljoin, urlparse
 from xml.sax.saxutils import escape
 
 import requests
@@ -21,8 +25,8 @@ from src.iptv_importer import (
     channels_for_category,
     check_url,
     delete_provider,
-    fetch_short_epg,
-    fetch_xtream_xmltv,
+    ensure_xtream_xmltv_cache,
+    parse_epg_file,
     build_xmltv_index,
     resolve_channel_xmltv_id,
     channel_now_next,
@@ -32,6 +36,8 @@ from src.iptv_importer import (
     xtream_live_url,
     start_daily_scheduler,
 )
+from src import epg_store
+from src.timeutils import now, now_date, now_hm, now_hms, now_iso
 
 
 def no_store(response: Response) -> Response:
@@ -41,20 +47,43 @@ def no_store(response: Response) -> Response:
     return response
 
 
-def proxied_url(url: str, stream_id: int | None = None, kind: str = "segment") -> str:
+def _source_group_for(src: dict) -> str:
+    group = (src.get("iptv_group") or "").strip()
+    if group:
+        return group
+    src_type = (src.get("type") or "otros").lower()
+    if src_type == "iptv":
+        return "Otros IPTV"
+    if src_type == "hls":
+        return "HLS directo"
+    if src_type == "youtube":
+        return "YouTube"
+    if src_type == "presentation":
+        return "Presentacion"
+    if src_type == "football":
+        return "Futbol"
+    return "Otros"
+
+
+def proxied_url(url: str, stream_id: int | None = None, kind: str = "segment", signing_key: str | None = None) -> str:
     sid = f"&sid={stream_id}" if stream_id is not None else ""
     endpoint = {
         "playlist": "/p/playlist.m3u8",
         "media": "/p/media.mp4",
         "segment": "/p/segment.ts",
     }.get(kind, "/p/segment.ts")
-    path = f"{endpoint}?url={quote(url, safe='')}{sid}"
+    sig = ""
+    if signing_key:
+        payload = f"{stream_id or ''}\n{kind}\n{url}"
+        digest = hmac.new(signing_key.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+        sig = f"&sig={digest}"
+    path = f"{endpoint}?url={quote(url, safe='')}{sid}{sig}"
     return absolute_url(path)
 
 
-def rewrite_playlist(content: str, base_url: str, live_window_segments: int = 0, stream_id: int | None = None) -> str:
+def rewrite_playlist(content: str, base_url: str, live_window_segments: int = 0, stream_id: int | None = None, signing_key: str | None = None) -> str:
     if "#EXTINF" in content and live_window_segments > 0:
-        return rewrite_media_playlist(content, base_url, live_window_segments, stream_id)
+        return rewrite_media_playlist(content, base_url, live_window_segments, stream_id, signing_key)
 
     lines = []
     for line in content.splitlines():
@@ -64,12 +93,12 @@ def rewrite_playlist(content: str, base_url: str, live_window_segments: int = 0,
             continue
 
         absolute_url = urljoin(base_url, stripped)
-        lines.append(proxied_url(absolute_url, stream_id, "playlist"))
+        lines.append(proxied_url(absolute_url, stream_id, "playlist", signing_key))
 
     return "\n".join(lines) + "\n"
 
 
-def rewrite_media_playlist(content: str, base_url: str, live_window_segments: int, stream_id: int | None) -> str:
+def rewrite_media_playlist(content: str, base_url: str, live_window_segments: int, stream_id: int | None, signing_key: str | None = None) -> str:
     header = []
     blocks = []
     current_block = []
@@ -108,12 +137,12 @@ def rewrite_media_playlist(content: str, base_url: str, live_window_segments: in
             continue
 
         absolute_url = urljoin(base_url, stripped)
-        current_block.append(proxied_url(absolute_url, stream_id, "segment"))
+        current_block.append(proxied_url(absolute_url, stream_id, "segment", signing_key))
         blocks.append(current_block)
         current_block = []
 
     if not blocks:
-        return rewrite_playlist(content, base_url, live_window_segments=0)
+        return rewrite_playlist(content, base_url, live_window_segments=0, stream_id=stream_id, signing_key=signing_key)
 
     removed_blocks = max(0, len(blocks) - live_window_segments)
     blocks = blocks[-live_window_segments:]
@@ -196,6 +225,52 @@ def presentation_loop_playlist(file_url: str, loop_count: int) -> str:
 
 def absolute_url(path: str) -> str:
     return urljoin(request.host_url, path.lstrip("/"))
+
+
+def proxy_signature(url: str, stream_id: int | None, kind: str, signing_key: str) -> str:
+    payload = f"{stream_id or ''}\n{kind}\n{url}"
+    return hmac.new(signing_key.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def is_public_http_url(url: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return False
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        return False
+    for info in infos:
+        host = info[4][0]
+        try:
+            ip = ipaddress.ip_address(host)
+        except ValueError:
+            return False
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+            return False
+    return True
+
+
+def redact_url(value: str | None) -> str:
+    if not value:
+        return ""
+    return re.sub(r"(/live/)([^/]+)(/)([^/]+)(/)", r"\1***\3***\5", value)
+
+
+def public_source(source: dict) -> dict:
+    item = dict(source)
+    if "url" in item:
+        item["url"] = redact_url(item.get("url"))
+    return item
+
+
+def public_provider(provider: dict) -> dict:
+    item = dict(provider)
+    if "username" in item:
+        item["username"] = "***"
+    if "password" in item:
+        item["password"] = "***"
+    return item
 
 
 class SegmentCache:
@@ -301,6 +376,9 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
     processed_audio_bitrate = os.environ.get("PROCESSED_AUDIO_BITRATE", "160k")
     processed_preset = os.environ.get("PROCESSED_PRESET", "veryfast")
     processed_height = int(os.environ.get("PROCESSED_HEIGHT", "1080"))
+    proxy_signing_key = os.environ.get("PROXY_SIGNING_KEY") or secrets.token_urlsafe(32)
+    allow_unsigned_proxy = os.environ.get("ALLOW_UNSIGNED_PROXY", "0") == "1"
+    epg_store.init_db()
     processed_delay_segments = max(1, math.ceil(processed_delay_seconds / max(1, processed_segment_seconds)))
     processed_effective_list_size = max(processed_list_size, processed_delay_segments + processed_extra_segments)
     processed_delete_threshold = max(4, processed_extra_segments)
@@ -693,6 +771,21 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
 
     playout = PlayoutEngine(state_file=os.environ.get("STATE_FILE", "data/state.json"))
 
+    def _warm_provider_epg(provider_id: str) -> None:
+        try:
+            data = _get_provider_epg(provider_id, include_programmes=False)
+            if data.get("error"):
+                return
+            if epg_store.channel_count(provider_id) == 0:
+                _sync_epg_store(provider_id, _get_provider_epg(provider_id, include_programmes=True))
+        except Exception:
+            pass
+
+    threading.Thread(
+        target=lambda: [_warm_provider_epg(p["id"]) for p in get_providers()],
+        daemon=True,
+    ).start()
+
     def activate_source(source: dict, reason: str, calendar_id: str | None = None) -> bool:
         source_id = source["id"]
         if source_id == stream_state.get("current_source_id") and stream_state.get("upstream_hls_url"):
@@ -702,7 +795,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         if source["type"] == "presentation":
             if not presentation_video.exists():
                 playout.add_history_entry({
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": now_iso(),
                     "source_id": source_id,
                     "source_name": source.get("name", "Video presentacion"),
                     "source_type": "presentation",
@@ -728,7 +821,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             try:
                 start_presentation_stream()
                 playout.add_history_entry({
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": now_iso(),
                     "source_id": source_id,
                     "source_name": source.get("name", "Video presentacion"),
                     "source_type": "presentation",
@@ -745,7 +838,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
                 stream_state["current_calendar_id"] = None
                 stream_state["error"] = f"No se pudo iniciar presentacion: {exc}"
                 playout.add_history_entry({
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": now_iso(),
                     "source_id": source_id,
                     "source_name": source.get("name", "Video presentacion"),
                     "source_type": "presentation",
@@ -760,7 +853,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             stop_preview_stream()
             stop_processed_stream()
             playout.add_history_entry({
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": now_iso(),
                 "source_id": source_id,
                 "source_name": source.get("name", ""),
                 "source_type": "football",
@@ -790,7 +883,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
                 error_msg = f"No se pudo activar fuente: {exc}"
                 stream_state["error"] = error_msg
                 playout.add_history_entry({
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": now_iso(),
                     "source_id": source_id,
                     "source_name": source.get("name", url),
                     "source_type": source_type,
@@ -823,7 +916,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
                 stream_state["processed_error"] = f"No se pudo iniciar procesado: {exc}"
 
         playout.add_history_entry({
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": now_iso(),
             "source_id": source_id,
             "source_name": source.get("name", url),
             "source_type": source_type,
@@ -852,7 +945,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
 
     @app.route("/")
     def index():
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = now_date()
         calendar_today = playout.get_calendar(today)
         next_entry = None
         for e in calendar_today:
@@ -868,7 +961,11 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
                 overlap_ids.add(cur["id"])
 
         state = playout.get_state()
-        sources = sorted(state["sources"], key=lambda s: s["name"].lower())
+        internal_sources = sorted(state["sources"], key=lambda s: s["name"].lower())
+
+        for s in internal_sources:
+            s.setdefault("group", _source_group_for(s))
+        sources = [public_source(s) for s in internal_sources]
         auto_enabled = state["auto_enabled"]
         calendar_counts: dict[str, int] = {}
         calendar_programs: dict[str, list[dict]] = {}
@@ -885,7 +982,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
                 "status": entry.get("status"),
             })
 
-        source_map = {s["id"]: s["name"] for s in sources}
+        source_map = {s["id"]: s["name"] for s in internal_sources}
 
         upstream_url = stream_state.get("upstream_hls_url")
         upstream_is_hls = bool(upstream_url and StreamExtractor.is_hls_url(upstream_url))
@@ -902,7 +999,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             is_hls=bool(stream_state["mode"]),
             is_direct_ts=upstream_is_direct,
             mode=stream_state["mode"],
-            source_url=stream_state["source_url"] or "",
+            source_url=redact_url(stream_state["source_url"]),
             source_url_name=stream_state.get("source_url_name"),
             error=stream_state["error"],
             connected=bool(stream_state["mode"]),
@@ -925,48 +1022,108 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         response.mimetype = "text/html"
         return response
 
+    def _entry_summary(entry: dict | None, source_map: dict[str, str]) -> dict | None:
+        if not entry:
+            return None
+        return {
+            "id": entry.get("id"),
+            "title": entry.get("title") or entry.get("epg_title") or "Programa",
+            "time": entry.get("time"),
+            "end_time": entry.get("end_time") or entry.get("epg_end_time"),
+            "source_id": entry.get("source_id"),
+            "source_name": source_map.get(entry.get("source_id", ""), entry.get("source_id", "") or ""),
+            "epg_title": entry.get("epg_title"),
+            "epg_description": entry.get("epg_description"),
+        }
+
+    def _seconds_between(hms_a: str, hms_b: str) -> int:
+        def _to_sec(s: str) -> int | None:
+            if not s:
+                return None
+            parts = s.split(":")
+            if len(parts) < 2:
+                return None
+            try:
+                h = int(parts[0])
+                m = int(parts[1])
+                sec = int(parts[2]) if len(parts) > 2 else 0
+                return h * 3600 + m * 60 + sec
+            except (ValueError, IndexError):
+                return None
+        a = _to_sec(hms_a)
+        b = _to_sec(hms_b)
+        if a is None or b is None:
+            return 0
+        diff = a - b
+        return max(0, diff)
+
     @app.route("/api/playout/status", methods=["GET"])
     def api_playout_status():
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = now_date()
         calendar_today = playout.get_calendar(today)
-        next_entry = None
-        for e in calendar_today:
-            if e.get("status") != "played" and e.get("enabled", True) and e.get("start_mode", "time") == "time":
-                next_entry = e
-                break
+        local_now_hm = now_hm()
+        local_now_hms = now_hms()
+        state = playout.get_state()
+        source_map = {s["id"]: s["name"] for s in state["sources"]}
+
+        # Current entry: prefer the one in stream_state, fall back to in-progress today
         current_cal_id = stream_state.get("current_calendar_id")
         current_entry = playout.find_calendar_entry(current_cal_id) if current_cal_id else None
-        now_hms = datetime.now().strftime("%H:%M:%S")
+        if not current_entry:
+            for e in calendar_today:
+                if (
+                    e.get("start_mode", "time") == "time"
+                    and e.get("enabled", True)
+                    and e.get("time")
+                    and e["time"] <= local_now_hm
+                    and (not e.get("end_time") or e["end_time"] > local_now_hm)
+                ):
+                    current_entry = e
+                    break
+
+        # Next entry: first pending/future entry today with time > now
+        next_entry = None
+        for e in calendar_today:
+            if e.get("enabled", True) and e.get("start_mode", "time") == "time" and e.get("time"):
+                if e.get("end_time") and e["end_time"] <= local_now_hm:
+                    continue
+                if e.get("status") == "played" and (not e.get("end_time") or e["end_time"] <= local_now_hm):
+                    continue
+                if e is current_entry:
+                    continue
+                if e["time"] > local_now_hm:
+                    next_entry = e
+                    break
+
+        current_summary = _entry_summary(current_entry, source_map)
+        next_summary = _entry_summary(next_entry, source_map)
+        if current_summary:
+            current_summary["remaining_seconds"] = _seconds_between(current_summary.get("end_time"), local_now_hms)
+        if next_summary:
+            next_summary["starts_in_seconds"] = _seconds_between(next_summary.get("time"), local_now_hms)
+
         return jsonify({
-            "now": now_hms,
+            "now": local_now_hms,
+            "today": today,
             "connected": bool(stream_state["mode"]),
             "current_source_id": stream_state.get("current_source_id"),
             "current_reason": stream_state.get("current_reason"),
             "current_source_name": stream_state.get("source_url_name"),
-            "current_entry": {
-                "id": current_entry["id"],
-                "title": current_entry.get("title"),
-                "time": current_entry.get("time"),
-                "end_time": current_entry.get("end_time"),
-                "source_id": current_entry.get("source_id"),
-            } if current_entry else None,
-            "next_entry": {
-                "id": next_entry["id"],
-                "title": next_entry.get("title"),
-                "time": next_entry.get("time"),
-                "end_time": next_entry.get("end_time"),
-                "source_id": next_entry.get("source_id"),
-            } if next_entry else None,
+            "current_entry": current_summary,
+            "next_entry": next_summary,
         })
 
     @app.route("/sources")
     def sources_page():
         state = playout.get_state()
-        iptv_providers = get_providers()
+        iptv_providers = [public_provider(p) for p in get_providers()]
+        sources_for_page = [public_source(s) for s in sorted(state["sources"], key=lambda s: s["name"].lower())]
+        for s in sources_for_page:
+            s.setdefault("group", _source_group_for(s))
         response = no_store(Response(render_template(
             "sources.html",
             app_version=app_version,
-            sources=sorted(state["sources"], key=lambda s: s["name"].lower()),
+            sources=sources_for_page,
             iptv_providers=iptv_providers,
         )))
         response.mimetype = "text/html"
@@ -1109,6 +1266,11 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
     def disconnect():
         force_presentation("desconexion manual")
         return redirect(url_for("index"))
+
+    @app.route("/api/presentation/start", methods=["POST"])
+    def api_presentation_start():
+        ok = force_presentation("emitir ahora")
+        return jsonify({"ok": ok, "error": None if ok else stream_state.get("error")})
 
     @app.route("/presentation.mp4")
     def presentation_mp4():
@@ -1434,7 +1596,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
                 return no_store(Response(stream_state["error"] + "\n", status=502))
 
         return no_store(Response(
-            rewrite_playlist(response.text, upstream_hls_url, live_window_segments, stream_state["stream_id"]),
+            rewrite_playlist(response.text, upstream_hls_url, live_window_segments, stream_state["stream_id"], proxy_signing_key),
             mimetype="application/vnd.apple.mpegurl",
         ))
 
@@ -1461,7 +1623,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             variant_url = best_variant_url(response.text, upstream_hls_url)
             if not variant_url:
                 return no_store(Response(
-                    rewrite_playlist(response.text, upstream_hls_url, live_window_segments, stream_state["stream_id"]),
+                    rewrite_playlist(response.text, upstream_hls_url, live_window_segments, stream_state["stream_id"], proxy_signing_key),
                     mimetype="application/vnd.apple.mpegurl",
                 ))
 
@@ -1480,7 +1642,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
                 variant_url = best_variant_url(response.text, refreshed_url)
                 if not variant_url:
                     return no_store(Response(
-                        rewrite_playlist(response.text, refreshed_url, live_window_segments, stream_state["stream_id"]),
+                        rewrite_playlist(response.text, refreshed_url, live_window_segments, stream_state["stream_id"], proxy_signing_key),
                         mimetype="application/vnd.apple.mpegurl",
                     ))
 
@@ -1493,7 +1655,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
                 return no_store(Response(stream_state["error"] + "\n", status=502))
 
         return no_store(Response(
-            rewrite_playlist(variant_response.text, variant_url, live_window_segments, stream_state["stream_id"]),
+            rewrite_playlist(variant_response.text, variant_url, live_window_segments, stream_state["stream_id"], proxy_signing_key),
             mimetype="application/vnd.apple.mpegurl",
         ))
 
@@ -1514,6 +1676,17 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         if request_sid is not None and request_sid != stream_state["stream_id"]:
             return no_store(Response("El canal cambio; descarta esta playlist antigua.\n", status=410))
 
+        kind = {
+            "proxy_playlist": "playlist",
+            "proxy_media": "media",
+        }.get(request.endpoint or "", "segment")
+        supplied_sig = request.args.get("sig", "")
+        expected_sig = proxy_signature(target_url, request_sid, kind, proxy_signing_key)
+        if not allow_unsigned_proxy and not hmac.compare_digest(supplied_sig, expected_sig):
+            return no_store(Response("Firma de proxy invalida.\n", status=403))
+        if not is_public_http_url(target_url):
+            return no_store(Response("Destino de proxy no permitido.\n", status=403))
+
         is_playlist = "manifest/hls" in target_url or target_url.endswith(".m3u8")
         range_header = request.headers.get("Range")
         if not is_playlist and not range_header:
@@ -1533,7 +1706,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
 
         content_type = upstream.headers.get("content-type", "")
         if "mpegurl" in content_type or is_playlist:
-            playlist = rewrite_playlist(upstream.text, target_url, live_window_segments, stream_state["stream_id"])
+            playlist = rewrite_playlist(upstream.text, target_url, live_window_segments, stream_state["stream_id"], proxy_signing_key)
             return no_store(Response(playlist, mimetype="application/vnd.apple.mpegurl"))
 
         if not range_header and segment_cache.should_cache(upstream.headers.get("content-length")):
@@ -1584,7 +1757,10 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
 
     @app.route("/api/sources", methods=["GET"])
     def api_sources():
-        return jsonify(playout.get_sources())
+        items = [public_source(s) for s in playout.get_sources()]
+        for item in items:
+            item.setdefault("group", _source_group_for(item))
+        return jsonify(items)
 
     @app.route("/api/sources/add_youtube", methods=["POST"])
     def api_add_youtube():
@@ -1710,11 +1886,12 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         if not provider_id:
             return jsonify({"ok": False, "error": "La fuente no es IPTV Xtream"})
 
-        epg_data = _get_provider_epg(provider_id)
-        epg_index = build_xmltv_index(epg_data)
+        epg_channels = _get_provider_epg(provider_id, include_programmes=False)
+        epg_index = build_xmltv_index(epg_channels)
         xmltv_id = resolve_channel_xmltv_id(source, epg_index)
         if not xmltv_id:
             return jsonify({"ok": False, "error": "Canal no encontrado en el EPG del proveedor"})
+        epg_data = _get_provider_epg(provider_id, channel_ids={xmltv_id})
         raw = epg_data.get("programmes", {}).get(xmltv_id, [])
 
         def _decode_text(value):
@@ -1766,20 +1943,54 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
     _xmltv_cache_lock = threading.Lock()
     _XMLTV_TTL_SECONDS = 6 * 3600
 
-    def _get_provider_epg(provider_id: str) -> dict:
-        with _xmltv_cache_lock:
-            cached = _xmltv_cache.get(provider_id)
-            if cached and (time.time() - cached.get("ts", 0)) < _XMLTV_TTL_SECONDS:
-                return cached["data"]
+    def _sync_epg_store(provider_id: str, data: dict) -> None:
+        try:
+            epg_store.upsert_epg(provider_id, data)
+        except Exception as exc:
+            print(f"[epg_store] upsert failed for {provider_id}: {exc}")
+
+    def _get_provider_epg(provider_id: str, channel_ids: set[str] | None = None, include_programmes: bool = True) -> dict:
         provider = get_provider(provider_id)
         if not provider:
             return {"channels": {}, "programmes": {}, "error": "proveedor no encontrado"}
+        if not include_programmes:
+            with _xmltv_cache_lock:
+                cached = _xmltv_cache.get(provider_id)
+                if cached and (time.time() - cached.get("ts", 0)) < _XMLTV_TTL_SECONDS:
+                    return cached["data"]
         try:
-            data = fetch_xtream_xmltv(provider)
+            if epg_store.channel_count(provider_id) > 0:
+                channels = epg_store.list_channels(provider_id)
+                if include_programmes:
+                    programmes = epg_store.channels_with_programmes(provider_id, channel_ids)
+                else:
+                    programmes = {}
+                data = {"channels": channels, "programmes": programmes, "cached": True, "source_url": "sqlite"}
+                if not include_programmes:
+                    with _xmltv_cache_lock:
+                        _xmltv_cache[provider_id] = {"ts": time.time(), "data": data}
+                return data
+        except Exception:
+            pass
+        try:
+            path = ensure_xtream_xmltv_cache(provider)
+            data = parse_epg_file(path, channel_ids=None, include_programmes=True)
         except Exception as exc:
             return {"channels": {}, "programmes": {}, "error": str(exc)}
-        with _xmltv_cache_lock:
-            _xmltv_cache[provider_id] = {"ts": time.time(), "data": data}
+        _sync_epg_store(provider_id, data)
+        if not include_programmes:
+            channels_only = {
+                cid: {"id": cid, "name": meta.get("name", cid), "icon": meta.get("icon", "")}
+                for cid, meta in data.get("channels", {}).items()
+            }
+            data = {"channels": channels_only, "programmes": {}, "cached": True, "source_url": "sqlite-imported"}
+            with _xmltv_cache_lock:
+                _xmltv_cache[provider_id] = {"ts": time.time(), "data": data}
+            return data
+        programmes = data.get("programmes", {})
+        if channel_ids:
+            programmes = {cid: progs for cid, progs in programmes.items() if cid in channel_ids}
+        data["programmes"] = programmes
         return data
 
     @app.route("/api/sources/<source_id>/epg_channels", methods=["GET"])
@@ -1802,12 +2013,19 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         except Exception as exc:
             return jsonify({"ok": False, "error": f"Error listando canales: {exc}"})
 
-        epg_data = _get_provider_epg(provider_id)
-        epg_index = build_xmltv_index(epg_data)
+        epg_channels = _get_provider_epg(provider_id, include_programmes=False)
+        epg_index = build_xmltv_index(epg_channels)
         now = datetime.utcnow()
         channels = []
+        xmltv_ids = set()
+        resolved_streams = []
         for s in streams:
             xmltv_id = resolve_channel_xmltv_id(s, epg_index)
+            if xmltv_id:
+                xmltv_ids.add(xmltv_id)
+            resolved_streams.append((s, xmltv_id))
+        epg_data = _get_provider_epg(provider_id, channel_ids=xmltv_ids) if xmltv_ids else {"programmes": {}}
+        for s, xmltv_id in resolved_streams:
             nn = channel_now_next(epg_data, xmltv_id, now=now) if xmltv_id else {"now": None, "next": None}
             channels.append({
                 "stream_id": s.get("iptv_stream_id"),
@@ -1825,8 +2043,8 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "category_id": category_id,
             "group": source.get("iptv_group", ""),
             "current_stream_id": stream_id,
-            "epg_error": epg_data.get("error"),
-            "epg_cached": epg_data.get("cached", False),
+            "epg_error": epg_channels.get("error") or epg_data.get("error"),
+            "epg_cached": epg_channels.get("cached", False),
             "channels": channels,
         })
 
@@ -1883,13 +2101,21 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             return "EPG no disponible para este proveedor", 404
         return send_file(str(path), mimetype="application/xml")
 
+    def _enrich_entry(entry: dict, source_map: dict[str, str]) -> dict:
+        if not entry:
+            return entry
+        out = dict(entry)
+        out["source_name"] = source_map.get(entry.get("source_id", ""), entry.get("source_id", "") or "")
+        return out
+
     @app.route("/api/calendar", methods=["POST"])
     def api_calendar():
-        date = request.form.get("date", datetime.now().strftime("%Y-%m-%d"))
+        date = request.form.get("date", now_date())
         entries = playout.get_calendar(date)
         state = playout.get_state()
         source_map = {s["id"]: s["name"] for s in state["sources"]}
-        return jsonify({"entries": entries, "source_map": source_map})
+        enriched = [_enrich_entry(e, source_map) for e in entries]
+        return jsonify({"entries": enriched, "source_map": source_map})
 
     @app.route("/api/calendar/reorder", methods=["POST"])
     def api_calendar_reorder():
@@ -1906,7 +2132,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
 
     @app.route("/api/calendar/last", methods=["POST"])
     def api_calendar_last():
-        date = request.form.get("date", datetime.now().strftime("%Y-%m-%d"))
+        date = request.form.get("date", now_date())
         entries = playout.get_calendar(date)
         last = entries[-1] if entries else None
         return jsonify({"last": last})
@@ -1919,15 +2145,16 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
                 return
             time_str = entry.get("time", "")
             if not time_str or ":" not in time_str:
-                time_str = datetime.now().strftime("%H:%M")
+                time_str = now_hm()
             provider_id = source.get("iptv_provider")
             if not provider_id:
                 return
-            epg_data = _get_provider_epg(provider_id)
-            epg_index = build_xmltv_index(epg_data)
+            epg_channels = _get_provider_epg(provider_id, include_programmes=False)
+            epg_index = build_xmltv_index(epg_channels)
             xmltv_id = resolve_channel_xmltv_id(source, epg_index)
             if not xmltv_id:
                 return
+            epg_data = _get_provider_epg(provider_id, channel_ids={xmltv_id})
             entries = epg_data.get("programmes", {}).get(xmltv_id, [])
             if not entries:
                 return
@@ -2275,7 +2502,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
     def daily_check_iptv(playout_engine, providers: list[dict], on_done=None) -> int:
         provider_map = {p["id"]: p for p in providers}
         state = playout_engine.get_state()
-        now_iso = datetime.now().isoformat()
+        local_now_iso = now_iso()
         checked = 0
         for src in state.get("sources", []):
             if src.get("type") != "iptv":
@@ -2289,7 +2516,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             url = xtream_live_url(provider, sid)
             status = check_url(url, timeout=4)
             updates = {
-                "last_checked_at": now_iso,
+                "last_checked_at": local_now_iso,
                 "last_check_status": status if status == "ok" else "offline",
                 "last_check_error": None if status == "ok" else status,
             }
@@ -2388,7 +2615,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
 
         try:
             add_provider(provider)
-            return jsonify({"ok": True, "provider": provider})
+            return jsonify({"ok": True, "provider": public_provider(provider)})
         except Exception as exc:
             return jsonify({"ok": False, "error": str(exc)})
 

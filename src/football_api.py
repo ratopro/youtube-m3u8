@@ -58,8 +58,9 @@ def has_spanish_team(event: dict) -> bool:
 
 
 def get_today_matches() -> list[dict]:
+    from src.timeutils import now_date
     events = fetch_events()
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = now_date()
     matches = []
     for ev in events:
         date_str = ev.get("Date", "")

@@ -9,6 +9,8 @@ services:
       LIVE_WINDOW_SEGMENTS: "30"
       PRESENTATION_LOOP_COUNT: "1000"
       STATE_FILE: "data/state.json"
+      TZ: "Europe/Madrid"
+      APP_TZ: "Europe/Madrid"
     ports:
       - "5058:5000"
     volumes:

@@ -1,4 +1,5 @@
 import difflib
+import io
 import re
 import xml.etree.ElementTree as ET
 import threading
@@ -115,39 +116,102 @@ def fetch_short_epg(provider: dict, stream_id: int | str, limit: int = 12) -> li
     return []
 
 
-def parse_epg_full(raw: bytes) -> dict:
-    root = ET.fromstring(raw)
+def _parse_epg_source(source, channel_ids: set[str] | None = None, include_programmes: bool = True) -> dict:
     channels: dict[str, dict] = {}
-    for ch_el in root.findall("channel"):
-        cid = ch_el.get("id", "")
-        if not cid:
-            continue
-        name_el = ch_el.find("display-name")
-        icon_el = ch_el.find("icon")
-        channels[cid] = {
-            "id": cid,
-            "name": (name_el.text or cid).strip() if name_el is not None and name_el.text else cid,
-            "icon": icon_el.get("src") if icon_el is not None and icon_el.get("src") else "",
-        }
     programmes: dict[str, list[dict]] = {}
-    for prog in root.findall("programme"):
-        ch = prog.get("channel", "")
-        if not ch:
-            continue
-        title_el = prog.find("title")
-        desc_el = prog.find("desc")
-        title = title_el.text.strip() if title_el is not None and title_el.text else "Programa"
-        desc = desc_el.text.strip() if desc_el is not None and desc_el.text else ""
-        programmes.setdefault(ch, []).append({
-            "title": title,
-            "description": desc,
-            "start": prog.get("start", ""),
-            "end": prog.get("stop", ""),
-            "channel_id": ch,
-        })
+
+    for _event, elem in ET.iterparse(source, events=("end",)):
+        tag = elem.tag.rsplit("}", 1)[-1]
+        if tag == "channel":
+            cid = elem.get("id", "")
+            if cid:
+                name_el = elem.find("display-name")
+                if name_el is None:
+                    name_el = elem.find("{*}display-name")
+                icon_el = elem.find("icon")
+                if icon_el is None:
+                    icon_el = elem.find("{*}icon")
+                channels[cid] = {
+                    "id": cid,
+                    "name": (name_el.text or cid).strip() if name_el is not None and name_el.text else cid,
+                    "icon": icon_el.get("src") if icon_el is not None and icon_el.get("src") else "",
+                }
+            elem.clear()
+        elif tag == "programme":
+            if not include_programmes:
+                elem.clear()
+                continue
+            ch = elem.get("channel", "")
+            if ch and (channel_ids is None or ch in channel_ids):
+                title_el = elem.find("title")
+                if title_el is None:
+                    title_el = elem.find("{*}title")
+                desc_el = elem.find("desc")
+                if desc_el is None:
+                    desc_el = elem.find("{*}desc")
+                title = title_el.text.strip() if title_el is not None and title_el.text else "Programa"
+                desc = desc_el.text.strip() if desc_el is not None and desc_el.text else ""
+                programmes.setdefault(ch, []).append({
+                    "title": title,
+                    "description": desc,
+                    "start": elem.get("start", ""),
+                    "end": elem.get("stop", ""),
+                    "channel_id": ch,
+                })
+            elem.clear()
+
     for ch_id in programmes:
         programmes[ch_id].sort(key=lambda x: x.get("start", ""))
     return {"channels": channels, "programmes": programmes}
+
+
+def parse_epg_full(raw: bytes) -> dict:
+    return _parse_epg_source(io.BytesIO(raw))
+
+
+def parse_epg_file(path: Path, channel_ids: set[str] | None = None, include_programmes: bool = True) -> dict:
+    return _parse_epg_source(path, channel_ids=channel_ids, include_programmes=include_programmes)
+
+
+def ensure_xtream_xmltv_cache(provider: dict, force: bool = False) -> Path:
+    cached = epg_cache_path(provider["id"])
+    if cached.exists() and not force:
+        return cached
+
+    dns_candidates = [provider["dns"]]
+    if provider.get("dns_alt"):
+        dns_candidates.append(provider["dns_alt"])
+
+    last_error = None
+    for dns in dns_candidates:
+        url = (
+            f"{dns}/xmltv.php"
+            f"?username={provider['username']}&password={provider['password']}"
+        )
+        req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        temp_path = None
+        try:
+            EPG_DIR.mkdir(parents=True, exist_ok=True)
+            temp_path = cached.with_suffix(".xml.tmp")
+            with urlopen(req, timeout=60) as r:
+                with temp_path.open("wb") as f:
+                    while True:
+                        chunk = r.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+            temp_path.replace(cached)
+            return cached
+        except Exception as exc:
+            last_error = exc
+            if temp_path is not None:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+            continue
+
+    raise RuntimeError(f"No se pudo descargar XMLTV del proveedor: {last_error}")
 
 
 EPG_DIR = Path("data/epg")
@@ -164,21 +228,10 @@ def fetch_xtream_xmltv(provider: dict) -> dict:
         dns_candidates.append(provider["dns_alt"])
     last_error = None
     for dns in dns_candidates:
-        url = (
-            f"{dns}/xmltv.php"
-            f"?username={provider['username']}&password={provider['password']}"
-        )
-        req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
         try:
-            with urlopen(req, timeout=60) as r:
-                raw = r.read()
-            data = parse_epg_full(raw)
-            try:
-                EPG_DIR.mkdir(parents=True, exist_ok=True)
-                epg_cache_path(provider["id"]).write_bytes(raw)
-            except Exception:
-                pass
-            data["source_url"] = url
+            cached = ensure_xtream_xmltv_cache({**provider, "dns": dns, "dns_alt": None}, force=True)
+            data = parse_epg_file(cached)
+            data["source_url"] = "xtream"
             data["cached"] = False
             return data
         except Exception as exc:
@@ -187,7 +240,7 @@ def fetch_xtream_xmltv(provider: dict) -> dict:
     cached = epg_cache_path(provider["id"])
     if cached.exists():
         try:
-            data = parse_epg_full(cached.read_bytes())
+            data = parse_epg_file(cached)
             data["cached"] = True
             data["source_url"] = "cache"
             return data

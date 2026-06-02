@@ -406,6 +406,7 @@
                     </div>
                 </div>
                 <div class="actions" style="margin-top:12px;">
+                    <button class="btn btn-sm btn-primary" onclick="emitNow()">Emitir ahora</button>
                     <button class="btn btn-sm" onclick="nextAuto()" {% if not auto_enabled %}disabled{% endif %}>Siguiente Auto</button>
                     <button class="btn btn-sm" onclick="stopEmission()" {% if not connected %}disabled{% endif %}>Detener</button>
                     {% if connected %}
@@ -426,14 +427,14 @@
         <div class="upcoming-row" id="upcoming-row"{% if not current_entry and not next_entry %} style="display:none;"{% endif %}>
             <div class="upcoming-current" id="upcoming-current-block"{% if not current_entry %} style="display:none;"{% endif %}>
                 <span class="upcoming-label">En emision</span>
-                <strong id="upcoming-current-title">{{ current_entry.title if current_entry else '-' }}</strong>
-                <span class="upcoming-meta" id="upcoming-current-meta">{{ source_map.get(current_entry.source_id, current_entry.source_id) if current_entry else '-' }}</span>
+                <strong id="upcoming-current-title">{{ (current_entry.epg_title or current_entry.title) if current_entry else '-' }}</strong>
+                <span class="upcoming-meta" id="upcoming-current-channel">{{ source_map.get(current_entry.source_id, current_entry.source_id) if current_entry else '-' }}</span>
                 <span class="upcoming-time" id="upcoming-current-time">-</span>
             </div>
             <div class="upcoming-next" id="upcoming-next-block"{% if not next_entry %} style="display:none;"{% endif %}>
                 <span class="upcoming-label">Siguiente</span>
-                <strong id="upcoming-next-title">{{ next_entry.title if next_entry else '-' }}</strong>
-                <span class="upcoming-meta" id="upcoming-next-meta">{{ source_map.get(next_entry.source_id, next_entry.source_id) if next_entry else '-' }}</span>
+                <strong id="upcoming-next-title">{{ (next_entry.epg_title or next_entry.title) if next_entry else '-' }}</strong>
+                <span class="upcoming-meta" id="upcoming-next-channel">{{ source_map.get(next_entry.source_id, next_entry.source_id) if next_entry else '-' }}</span>
                 <span class="upcoming-time" id="upcoming-next-time">-</span>
             </div>
         </div>
@@ -472,13 +473,8 @@
                         <div style="font-size:14px; color:#9ca3af; margin-bottom:8px; font-weight:600;">Arrastra al calendario</div>
                         <div style="display:flex; gap:6px; margin-bottom:8px;">
                             <input type="text" id="panel-source-search" oninput="filterPanelSources()" placeholder="Buscar canal en fuentes..." style="flex:1; background:#030712; border:1px solid #4b5563; border-radius:6px; color:#fff; font-size:14px; padding:8px 10px;">
-                            <select id="panel-source-type-filter" onchange="filterPanelSources()" style="min-width:110px; background:#030712; border:1px solid #4b5563; border-radius:6px; color:#fff; font-size:13px; padding:8px 10px;">
-                                <option value="">Todos</option>
-                                <option value="youtube">YouTube</option>
-                                <option value="hls">HLS</option>
-                                <option value="iptv">IPTV</option>
-                                <option value="xtream">Xtream</option>
-                                <option value="presentation">Presentacion</option>
+                            <select id="panel-source-group-filter" onchange="filterPanelSources()" style="min-width:140px; background:#030712; border:1px solid #4b5563; border-radius:6px; color:#fff; font-size:13px; padding:8px 10px;">
+                                <option value="">Todos los grupos</option>
                             </select>
                         </div>
                         {% for s in sources %}
@@ -486,6 +482,7 @@
                         <div draggable="true" class="source-panel-item" data-source-id="{{ s.id }}"
                              data-source-name="{{ s.name|lower }}"
                              data-source-type="{{ s.type|lower }}"
+                             data-source-group="{{ (s.group or 'Otros')|lower }}"
                              ondblclick="loadSourceEpg('{{ s.id }}')"
                              style="padding:8px 10px; margin-bottom:4px; border-radius:6px; border:1px solid #374151; cursor:grab; font-size:14px; display:flex; align-items:center; gap:8px; background:#111827; transition: background 0.15s, border-color 0.15s;">
                              <span style="color:#6b7280; font-size:14px;">☰</span>
@@ -510,14 +507,9 @@
             <summary style="display:none;">Formulario añadir programa</summary>
             <div class="iptv-load-area">
                 <div class="input-row">
-                    <input type="text" id="cal-source-search" oninput="filterCalendarSourceOptions()" placeholder="Buscar fuente por nombre o tipo...">
-                    <select id="cal-source-type-filter" onchange="filterCalendarSourceOptions()" style="max-width:180px;">
-                        <option value="">Todos los tipos</option>
-                        <option value="youtube">YouTube</option>
-                        <option value="hls">HLS</option>
-                        <option value="iptv">IPTV</option>
-                        <option value="xtream">Xtream</option>
-                        <option value="presentation">Presentacion</option>
+                    <input type="text" id="cal-source-search" oninput="filterCalendarSourceOptions()" placeholder="Buscar fuente por nombre...">
+                    <select id="cal-source-group-filter" onchange="filterCalendarSourceOptions()" style="max-width:180px;">
+                        <option value="">Todos los grupos</option>
                     </select>
                 </div>
                 <div class="input-row">
@@ -525,7 +517,7 @@
                         <option value="">-- Selecciona fuente --</option>
                         {% for s in sources %}
                         {% if s.get('emit_enabled', True) %}
-                        <option value="{{ s.id }}" data-source-name="{{ s.name|lower }}" data-source-type="{{ s.type|lower }}">{{ s.name }} ({{ s.type }})</option>
+                        <option value="{{ s.id }}" data-source-name="{{ s.name|lower }}" data-source-type="{{ s.type|lower }}" data-source-group="{{ (s.group or 'Otros')|lower }}">{{ s.name }} ({{ s.type }})</option>
                         {% endif %}
                         {% endfor %}
                     </select>
@@ -848,6 +840,7 @@
     if (initialDate && initialDate.value && typeof renderDayPrograms === 'function') {
         renderDayPrograms(initialDate.value);
     }
+    if (typeof populateGroupFilters === 'function') populateGroupFilters();
 
     refreshPlayoutStatus();
     renderUpcoming();
@@ -1544,6 +1537,22 @@
             });
     }
 
+    function emitNow() {
+        fetch('/api/auto/next', { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) { location.reload(); return; }
+                fetch('/api/presentation/start', { method: 'POST' })
+                    .then(function(r2) { return r2.json(); })
+                    .then(function(data2) {
+                        if (data2.ok) { location.reload(); }
+                        else { showError(data2.error || 'No se pudo iniciar emision'); }
+                    })
+                    .catch(function() { showError('Error de red'); });
+            })
+            .catch(function() { showError('Error de red'); });
+    }
+
     function validateSource(id) {
         var form = new FormData();
         form.append('source_id', id);
@@ -1626,8 +1635,8 @@
         if (cur) {
             currentBlock.style.display = 'flex';
             document.getElementById('upcoming-current-title').textContent = cur.title || '-';
-            document.getElementById('upcoming-current-meta').textContent =
-                playoutStatus.source_map[cur.source_id] || cur.source_id || '';
+            document.getElementById('upcoming-current-channel').textContent =
+                cur.source_name || (cur.source_id ? playoutStatus.source_map[cur.source_id] : '') || '-';
         } else {
             currentBlock.style.display = 'none';
         }
@@ -1635,8 +1644,8 @@
         if (nxt) {
             nextBlock.style.display = 'flex';
             document.getElementById('upcoming-next-title').textContent = nxt.title || '-';
-            document.getElementById('upcoming-next-meta').textContent =
-                playoutStatus.source_map[nxt.source_id] || nxt.source_id || '';
+            document.getElementById('upcoming-next-channel').textContent =
+                nxt.source_name || (nxt.source_id ? playoutStatus.source_map[nxt.source_id] : '') || '-';
         } else {
             nextBlock.style.display = 'none';
         }
@@ -1663,9 +1672,8 @@
                 var nowSec = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
                 var remain = endSec - nowSec;
                 if (remain < 0) remain = 0;
-                currentTimeEl.textContent = 'termina en ' + fmtHMS(remain);
+                currentTimeEl.textContent = (cur.time ? (cur.time + ' · ') : '') + 'termina en ' + fmtHMS(remain);
 
-                // Parpadeo amarillo a 15 segundos
                 if (remain <= 15 && remain > 0) {
                     if (!currentBlock.classList.contains('epg-warning')) {
                         currentBlock.classList.add('epg-warning');
@@ -1674,15 +1682,14 @@
                     currentBlock.classList.remove('epg-warning');
                 }
 
-                // Salto automático a los 0 segundos
                 if (remain === 0 && !playoutStatus.triggering_next && cur.id) {
                     triggerAutoNext();
                 }
             } else {
-                currentTimeEl.textContent = '-';
+                currentTimeEl.textContent = (cur.time ? cur.time + ' · ' : '') + 'sin hora de fin';
             }
         } else if (cur) {
-            currentTimeEl.textContent = 'sin hora de fin';
+            currentTimeEl.textContent = (cur.time ? cur.time + ' · ' : '') + 'sin hora de fin';
             currentBlock.classList.remove('epg-warning');
         } else {
             currentTimeEl.textContent = '-';
@@ -1696,9 +1703,9 @@
                 var nSec = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
                 var diff = targetSec - nSec;
                 if (diff < 0) diff = 0;
-                nextTimeEl.textContent = 'empieza en ' + fmtHMS(diff);
+                nextTimeEl.textContent = nxt.time + ' · empieza en ' + fmtHMS(diff);
             } else {
-                nextTimeEl.textContent = '-';
+                nextTimeEl.textContent = nxt.time || '-';
             }
         } else {
             nextTimeEl.textContent = '-';
@@ -1746,21 +1753,63 @@
         }
     }
 
+    function populateGroupFilters() {
+        var groupsPanel = {};
+        document.querySelectorAll('.source-panel-item').forEach(function(item) {
+            var g = (item.dataset.sourceGroup || '').trim();
+            if (g) groupsPanel[g] = true;
+        });
+        var panelSel = document.getElementById('panel-source-group-filter');
+        if (panelSel) {
+            var currentPanel = panelSel.value;
+            panelSel.innerHTML = '<option value="">Todos los grupos</option>';
+            Object.keys(groupsPanel).sort().forEach(function(g) {
+                var opt = document.createElement('option');
+                opt.value = g.toLowerCase();
+                opt.textContent = g;
+                panelSel.appendChild(opt);
+            });
+            if (currentPanel) panelSel.value = currentPanel;
+        }
+
+        var groupsCal = {};
+        var selCal = document.getElementById('cal-source-id');
+        if (selCal) {
+            Array.prototype.forEach.call(selCal.options, function(opt, idx) {
+                if (idx === 0) return;
+                var g = (opt.dataset.sourceGroup || '').trim();
+                if (g) groupsCal[g] = true;
+            });
+        }
+        var calSel = document.getElementById('cal-source-group-filter');
+        if (calSel) {
+            var currentCal = calSel.value;
+            calSel.innerHTML = '<option value="">Todos los grupos</option>';
+            Object.keys(groupsCal).sort().forEach(function(g) {
+                var opt = document.createElement('option');
+                opt.value = g.toLowerCase();
+                opt.textContent = g;
+                calSel.appendChild(opt);
+            });
+            if (currentCal) calSel.value = currentCal;
+        }
+    }
+
     function filterPanelSources() {
         var q = (document.getElementById('panel-source-search').value || '').toLowerCase().trim();
-        var type = (document.getElementById('panel-source-type-filter').value || '').toLowerCase().trim();
+        var group = (document.getElementById('panel-source-group-filter').value || '').toLowerCase().trim();
         document.querySelectorAll('.source-panel-item').forEach(function(item) {
             var name = (item.dataset.sourceName || '').toLowerCase();
-            var sourceType = (item.dataset.sourceType || '').toLowerCase();
-            var okText = !q || name.indexOf(q) !== -1 || sourceType.indexOf(q) !== -1;
-            var okType = !type || sourceType === type;
-            item.style.display = okText && okType ? 'flex' : 'none';
+            var sourceGroup = (item.dataset.sourceGroup || '').toLowerCase();
+            var okText = !q || name.indexOf(q) !== -1;
+            var okGroup = !group || sourceGroup === group;
+            item.style.display = okText && okGroup ? 'flex' : 'none';
         });
     }
 
     function filterCalendarSourceOptions() {
         var q = (document.getElementById('cal-source-search').value || '').toLowerCase().trim();
-        var type = (document.getElementById('cal-source-type-filter').value || '').toLowerCase().trim();
+        var group = (document.getElementById('cal-source-group-filter').value || '').toLowerCase().trim();
         var sel = document.getElementById('cal-source-id');
         if (!sel) return;
         var hadSelected = sel.value;
@@ -1771,10 +1820,10 @@
                 return;
             }
             var name = (opt.dataset.sourceName || opt.text || '').toLowerCase();
-            var sourceType = (opt.dataset.sourceType || '').toLowerCase();
-            var okText = !q || name.indexOf(q) !== -1 || sourceType.indexOf(q) !== -1;
-            var okType = !type || sourceType === type;
-            var visible = okText && okType;
+            var sourceGroup = (opt.dataset.sourceGroup || '').toLowerCase();
+            var okText = !q || name.indexOf(q) !== -1;
+            var okGroup = !group || sourceGroup === group;
+            var visible = okText && okGroup;
             opt.hidden = !visible;
             if (visible && opt.value === hadSelected) keepSelected = true;
         });
