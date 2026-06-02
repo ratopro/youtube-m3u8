@@ -1,6 +1,7 @@
 import json
 import os
 import random
+import re
 import threading
 import time
 from datetime import datetime
@@ -17,6 +18,15 @@ def _add_time(time_str: str, duration_seconds: int | None) -> str | None:
     return f"{hours:02d}:{minutes:02d}"
 
 
+def _epg_end_to_hm(epg_end: str | None) -> str | None:
+    if not epg_end or not isinstance(epg_end, str):
+        return None
+    digits = re.sub(r"[^0-9]", "", epg_end)
+    if len(digits) < 12:
+        return None
+    return f"{digits[8:10]}:{digits[10:12]}"
+
+
 def default_state():
     return {
         "version": 2,
@@ -29,7 +39,7 @@ def default_state():
 class PlayoutEngine:
     def __init__(self, state_file: str):
         self.state_file = state_file
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.callbacks = {}
         self._state = None
         self._running = False
@@ -45,6 +55,13 @@ class PlayoutEngine:
             try:
                 with open(path) as f:
                     self._state = json.load(f)
+                changed = False
+                for s in self._state.get("sources", []):
+                    if "emit_enabled" not in s:
+                        s["emit_enabled"] = False
+                        changed = True
+                if changed:
+                    self._save()
                 return
             except (json.JSONDecodeError, Exception):
                 pass
@@ -276,6 +293,11 @@ class PlayoutEngine:
             entries = [e for e in self._state["calendar"] if e["date"] == date]
             last_end = None
             for entry in entries:
+                epg_end_hm = _epg_end_to_hm(entry.get("epg_end"))
+                if epg_end_hm:
+                    entry["end_time"] = epg_end_hm
+                    last_end = epg_end_hm
+                    continue
                 dur = entry.get("duration_seconds")
                 if entry.get("start_mode") == "time":
                     if not entry.get("time_locked") and last_end:
@@ -324,6 +346,7 @@ class PlayoutEngine:
             source["id"] = src_id
             source["created_at"] = datetime.now().isoformat()
             source.setdefault("auto_enabled", True)
+            source.setdefault("emit_enabled", False)
             self._state["sources"].append(source)
             self._save()
             return src_id
@@ -341,6 +364,25 @@ class PlayoutEngine:
             ]
             self._save()
             return True
+
+    def delete_sources_by_provider(self, provider_id: str) -> int:
+        with self.lock:
+            source_ids = {
+                s["id"] for s in self._state["sources"]
+                if s.get("iptv_provider") == provider_id
+            }
+            before = len(self._state["sources"])
+            self._state["sources"] = [
+                s for s in self._state["sources"]
+                if s.get("iptv_provider") != provider_id
+            ]
+            removed = before - len(self._state["sources"])
+            self._state["calendar"] = [
+                e for e in self._state["calendar"]
+                if e.get("source_id") not in source_ids
+            ]
+            self._save()
+            return removed
 
     def toggle_source_auto(self, source_id: str) -> bool:
         with self.lock:
@@ -402,11 +444,11 @@ class PlayoutEngine:
             entry.setdefault("is_live", src.get("is_live", True))
         entry.setdefault("start_mode", "time")
         entry.setdefault("time", "")
+        entry.setdefault("end_time", None)
         entry["time_locked"] = entry.get("start_mode") == "time" and bool(entry.get("time"))
         entry["id"] = cal_id
         entry["enabled"] = entry.get("enabled", True)
         entry["status"] = "pending"
-        entry["end_time"] = None
 
     def delete_calendar_entry(self, cal_id: str) -> bool:
         with self.lock:
@@ -444,6 +486,13 @@ class PlayoutEngine:
                     self._save()
                     return True
             return False
+
+    def find_calendar_entry(self, cal_id: str) -> dict | None:
+        with self.lock:
+            for e in self._state["calendar"]:
+                if e["id"] == cal_id:
+                    return dict(e)
+            return None
 
     def update_calendar_entry(self, cal_id: str, updates: dict) -> bool:
         with self.lock:

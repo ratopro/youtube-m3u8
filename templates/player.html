@@ -86,6 +86,7 @@
         .source-type { font-size: 12px; padding: 2px 6px; border-radius: 4px; font-weight: 600; }
         .source-type.yt { background: #7c3aed; }
         .source-type.iptv { background: #0891b2; }
+        .source-type.xtream { background: #059669; }
         .source-type.hls { background: #d97706; }
         .source-type.pres { background: #6b7280; }
 
@@ -126,9 +127,11 @@
 
         .badge { font-size: 13px; background: #374151; padding: 2px 8px; border-radius: 10px; color: #d1d5db; }
 
-        .links { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
-        .links a { color: #93c5fd; font-size: 14px; }
+        .links { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+        .link-row { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+        .links a { color: #93c5fd; font-size: 14px; min-width: 230px; }
         .links a:hover { color: #bfdbfe; }
+        .link-desc { color: #9ca3af; font-size: 13px; }
 
         .section-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
         .section-header h3 { margin: 0; }
@@ -165,6 +168,57 @@
             font-size:14px; color:#9ca3af; padding: 8px 16px 12px;
             border-top: 1px solid #374151;
         }
+        .upcoming-row {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            font-size: 14px;
+            color: #d1d5db;
+            padding: 10px 16px 14px;
+            border-top: 1px solid #374151;
+            transition: background 0.3s;
+        }
+        .upcoming-current, .upcoming-next {
+            flex: 1 1 280px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid #374151;
+            background: #0f172a;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .upcoming-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #6b7280;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: #1f2937;
+        }
+        .upcoming-time {
+            margin-left: auto;
+            color: #93c5fd;
+            font-variant-numeric: tabular-nums;
+            font-weight: 700;
+        }
+        .upcoming-current.epg-warning {
+            background: #facc15;
+            color: #111827;
+            border-color: #facc15;
+            animation: epg-blink 0.6s steps(2, start) infinite;
+        }
+        .upcoming-current.epg-warning .upcoming-time,
+        .upcoming-current.epg-warning .upcoming-label,
+        .upcoming-current.epg-warning strong { color: #111827; }
+        .upcoming-current.epg-warning .upcoming-label { background: #111827; color: #facc15; }
+        @keyframes epg-blink {
+            0%, 100% { background: #facc15; }
+            50% { background: #fde68a; }
+        }
         .preview-badge {
             position: absolute; top: 8px; left: 8px;
             font-size: 11px; font-weight: 700; padding: 2px 8px;
@@ -172,6 +226,22 @@
             text-transform: uppercase; letter-spacing: 1px;
         }
         .preview-player { position: relative; }
+        .digital-clock {
+            margin-top: 12px;
+            display: inline-block;
+            padding: 8px 14px;
+            border-radius: 10px;
+            border: 1px solid #14532d;
+            background: linear-gradient(180deg, #052e16 0%, #03160c 100%);
+            box-shadow: inset 0 0 12px rgba(34, 197, 94, 0.18), 0 0 14px rgba(34, 197, 94, 0.22);
+            font-size: 40px;
+            font-weight: 700;
+            font-family: "Courier New", monospace;
+            letter-spacing: 2px;
+            color: #86efac;
+            text-shadow: 0 0 8px rgba(134, 239, 172, 0.65);
+            line-height: 1;
+        }
 
         @media (max-width: 700px) {
             .preview-layout { flex-direction: column; }
@@ -211,15 +281,65 @@
 
         .cal-overlap { background: #3d2e00 !important; border-left: 3px solid #eab308 !important; }
 
+        .calendar-board { display: grid; grid-template-columns: 340px 1fr; gap: 12px; margin: 10px 0 12px; }
+        .month-calendar { background: #111827; border: 1px solid #374151; border-radius: 10px; padding: 10px; }
+        .month-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .month-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+        .month-weekday { color: #9ca3af; font-size: 11px; text-align: center; padding: 4px 0; }
+        .month-day { border: 1px solid #374151; border-radius: 6px; min-height: 34px; font-size: 12px; color: #d1d5db; background: #0b1220; cursor: pointer; }
+        .month-day.muted { opacity: 0.35; cursor: default; }
+        .month-day.has-items { background: #14532d; border-color: #16a34a; }
+        .month-day.active { outline: 2px solid #2563eb; }
+        .day-programs { background: #111827; border: 1px solid #374151; border-radius: 10px; padding: 10px; }
+        .day-programs ul { margin: 8px 0 0; padding-left: 18px; }
+        .day-programs li { margin: 4px 0; font-size: 13px; }
+        .sources-epg-layout { display: flex; gap: 12px; align-items: stretch; width: 100%; }
+        .sources-list-col { flex: 2; min-width: 0; border-right: 1px solid #374151; padding-right: 12px; max-height: 400px; overflow-y: auto; }
+        .epg-col { flex: 3; min-width: 0; max-height: 400px; overflow-y: auto; }
+        #sources-panel { width: 100%; flex: 1 1 100%; min-width: 0; box-sizing: border-box; }
+        .epg-item { border: 1px solid #374151; border-radius: 8px; padding: 8px; margin-top: 8px; }
+        .epg-meta { color: #9ca3af; font-size: 12px; margin-top: 4px; }
+
+        .epg-loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 28px 12px;
+            color: #d1d5db;
+            font-size: 14px;
+            text-align: center;
+        }
+        .epg-loading-text { margin-top: 12px; line-height: 1.5; }
+        .epg-loading-sub { color: #9ca3af; font-size: 12px; }
+        .epg-spinner {
+            width: 36px;
+            height: 36px;
+            border: 3px solid #374151;
+            border-top-color: #6ee7b7;
+            border-radius: 50%;
+            animation: epg-spin 0.9s linear infinite;
+        }
+        @keyframes epg-spin {
+            to { transform: rotate(360deg); }
+        }
+
         .drag-handle {
             cursor: grab; color: #6b7280; font-size: 16px; padding: 0 4px; user-select: none;
         }
         .drag-handle:active { cursor: grabbing; }
         .cal-list li.dragging { opacity: 0.5; border-style: dashed; }
+        .source-panel-item.epg-selected { background: #1e3a5f !important; border-color: #6ee7b7 !important; }
+        .source-panel-item.epg-loading-item { opacity: 0.6; border-color: #fbbf24 !important; }
         .cal-list li.drag-over { border-color: #2563eb; border-style: solid; }
+        #day-programs-list li.dragging { background: #065f46 !important; opacity: 0.8; border-color: #34d399; }
+        #day-programs-list li.drag-over { border-left: 3px solid #3b82f6; transform: translateX(6px); background: #1e3a5f; transition: transform 0.15s, background 0.15s; }
 
         @media (max-width: 600px) {
             body { padding: 12px; }
+            .calendar-board { grid-template-columns: 1fr; }
+            .sources-epg-layout { flex-direction: column; }
+            .sources-list-col, .epg-col { flex: none; width: 100%; max-height: 320px; border-right: none; padding-right: 0; }
             .input-row { flex-direction: column; }
             .input-row input { min-width: 0; }
             .source-list li, .cal-list li { flex-direction: column; align-items: flex-start; }
@@ -288,7 +408,11 @@
                 <div class="actions" style="margin-top:12px;">
                     <button class="btn btn-sm" onclick="nextAuto()" {% if not auto_enabled %}disabled{% endif %}>Siguiente Auto</button>
                     <button class="btn btn-sm" onclick="stopEmission()" {% if not connected %}disabled{% endif %}>Detener</button>
+                    {% if connected %}
+                    <button class="btn btn-sm" id="preview-toggle-btn" onclick="togglePreview()">Preview ON</button>
+                    {% endif %}
                 </div>
+                <div class="digital-clock" id="digital-clock">--:--:--</div>
             </div>
             <div class="preview-player">
                 {% if connected %}
@@ -299,13 +423,20 @@
                 {% endif %}
             </div>
         </div>
-        {% if connected and next_entry %}
-            <div class="next-row">
-                Proximo: <strong>{{ next_entry.title }}</strong> a las <strong>{{ next_entry.time }}</strong>
-                &middot; {{ source_map.get(next_entry.source_id, next_entry.source_id) }}
-                <span id="countdown"></span>
+        <div class="upcoming-row" id="upcoming-row"{% if not current_entry and not next_entry %} style="display:none;"{% endif %}>
+            <div class="upcoming-current" id="upcoming-current-block"{% if not current_entry %} style="display:none;"{% endif %}>
+                <span class="upcoming-label">En emision</span>
+                <strong id="upcoming-current-title">{{ current_entry.title if current_entry else '-' }}</strong>
+                <span class="upcoming-meta" id="upcoming-current-meta">{{ source_map.get(current_entry.source_id, current_entry.source_id) if current_entry else '-' }}</span>
+                <span class="upcoming-time" id="upcoming-current-time">-</span>
             </div>
-        {% endif %}
+            <div class="upcoming-next" id="upcoming-next-block"{% if not next_entry %} style="display:none;"{% endif %}>
+                <span class="upcoming-label">Siguiente</span>
+                <strong id="upcoming-next-title">{{ next_entry.title if next_entry else '-' }}</strong>
+                <span class="upcoming-meta" id="upcoming-next-meta">{{ source_map.get(next_entry.source_id, next_entry.source_id) if next_entry else '-' }}</span>
+                <span class="upcoming-time" id="upcoming-next-time">-</span>
+            </div>
+        </div>
     </div>
 
     <div class="card full">
@@ -314,88 +445,88 @@
             <span class="badge">{{ calendar_today|length }} programas</span>
             <div class="actions">
                 <button class="btn btn-sm btn-primary" onclick="toggleAddForm()">+ Añadir programa</button>
-                <button class="btn btn-sm" id="sources-panel-btn" onclick="toggleSourcesPanel()">Fuentes</button>
+                <button class="btn btn-sm" id="sources-panel-btn" onclick="toggleSourcesPanel()">Sources</button>
                 <button class="btn btn-sm" onclick="fetchFootballMatches()">⚽ Fútbol</button>
                 <button class="btn btn-sm" onclick="refreshCalendar()">Recargar</button>
             </div>
         </div>
-        <div class="input-row">
-            <input type="date" id="cal-date" value="{{ calendar_date }}">
-            <button class="btn btn-sm" onclick="changeDate()">Ir</button>
+        <input type="hidden" id="cal-date" value="{{ calendar_date }}">
+        <div class="calendar-board">
+            <div class="month-calendar">
+                <div class="month-head">
+                    <button class="btn btn-sm" onclick="changeMonth(-1)">«</button>
+                    <strong id="month-label"></strong>
+                    <button class="btn btn-sm" onclick="changeMonth(1)">»</button>
+                </div>
+                <div class="month-grid" id="month-grid"></div>
+            </div>
+            <div class="day-programs">
+                <div style="font-size:14px; font-weight:700;" id="day-programs-title">Programas</div>
+                <div id="day-programs-body" class="empty"></div>
+            </div>
         </div>
         <div style="display:flex; gap:12px; position:relative;">
-            <div id="sources-panel" style="display:none; width:240px; flex-shrink:0; border-right:1px solid #374151; padding-right:12px; max-height:400px; overflow-y:auto;">
-                <div style="font-size:14px; color:#9ca3af; margin-bottom:8px; font-weight:600;">Arrastra al calendario</div>
-                {% for s in sources %}
-                {% if s.type not in ('football', 'iptv') %}
-                <div draggable="true" class="source-panel-item" data-source-id="{{ s.id }}"
-                     style="padding:6px 8px; margin-bottom:4px; border-radius:6px; border:1px solid #374151; cursor:grab; font-size:13px; display:flex; align-items:center; gap:6px; background:#111827;">
-                    <span style="color:#6b7280; font-size:14px;">☰</span>
-                    <span class="source-type {{ s.type }}" style="font-size:11px;">{{ s.type }}</span>
-                    <span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ s.name }}</span>
-                    {% if s.duration_label %}
-                        <span style="color:#6ee7b7; font-size:11px;">{{ s.duration_label }}</span>
-                    {% endif %}
-                </div>
-                {% endif %}
-                {% endfor %}
-            </div>
-            <div style="flex:1; min-width:0;">
-                <div id="calendar-list">
-                    {% if calendar_today %}
-            <ul class="cal-list" id="cal-list-today">
-                {% for e in calendar_today %}
-                <li draggable="true" data-id="{{ e.id }}"{% if e.id in overlap_ids %} class="cal-overlap"{% endif %}>
-                    <span class="drag-handle">☰</span>
-                    {% if e.get('start_mode') == 'after_previous' %}
-                        <span class="cal-after">Despues del anterior</span>
-                    {% else %}
-                        <span class="cal-time">{{ e.time }}</span>
-                    {% endif %}
-                    <span class="cal-title">{{ e.title }}</span>
-                    <span class="cal-source">{{ source_map.get(e.source_id, e.source_id) }}</span>
-                    {% if e.get('duration_label') %}
-                        <span class="cal-dur">{{ e.duration_label }}</span>
-                    {% endif %}
-                    {% if e.get('end_time') %}
-                        <span class="cal-end">Fin {{ e.end_time }}</span>
-                    {% elif e.get('start_mode') == 'time' and e.get('time') and not e.get('duration_seconds') %}
-                        <span class="cal-depends">Depende del emisor</span>
-                    {% elif e.get('start_mode') == 'after_previous' and not e.get('end_time') %}
-                        <span class="cal-depends">Depende del emisor</span>
-                    {% endif %}
-                    {% if e.status == 'played' %}
-                        <span class="tag cal-played">Emitido</span>
-                    {% elif not e.enabled %}
-                        <span class="tag cal-disabled">Off</span>
-                    {% else %}
-                        <span class="tag cal-enabled">Pendiente</span>
-                    {% endif %}
-                    <div class="actions">
-                        {% if e.enabled %}
-                            <button class="btn btn-sm btn-success" onclick="playNow('{{ e.id }}')">Emitir</button>
+            <div id="sources-panel" style="display:none;">
+                <div class="sources-epg-layout">
+                    <div class="sources-list-col">
+                        <div style="font-size:14px; color:#9ca3af; margin-bottom:8px; font-weight:600;">Arrastra al calendario</div>
+                        <div style="display:flex; gap:6px; margin-bottom:8px;">
+                            <input type="text" id="panel-source-search" oninput="filterPanelSources()" placeholder="Buscar canal en fuentes..." style="flex:1; background:#030712; border:1px solid #4b5563; border-radius:6px; color:#fff; font-size:14px; padding:8px 10px;">
+                            <select id="panel-source-type-filter" onchange="filterPanelSources()" style="min-width:110px; background:#030712; border:1px solid #4b5563; border-radius:6px; color:#fff; font-size:13px; padding:8px 10px;">
+                                <option value="">Todos</option>
+                                <option value="youtube">YouTube</option>
+                                <option value="hls">HLS</option>
+                                <option value="iptv">IPTV</option>
+                                <option value="xtream">Xtream</option>
+                                <option value="presentation">Presentacion</option>
+                            </select>
+                        </div>
+                        {% for s in sources %}
+                        {% if s.type != 'football' and s.get('emit_enabled', True) %}
+                        <div draggable="true" class="source-panel-item" data-source-id="{{ s.id }}"
+                             data-source-name="{{ s.name|lower }}"
+                             data-source-type="{{ s.type|lower }}"
+                             ondblclick="loadSourceEpg('{{ s.id }}')"
+                             style="padding:8px 10px; margin-bottom:4px; border-radius:6px; border:1px solid #374151; cursor:grab; font-size:14px; display:flex; align-items:center; gap:8px; background:#111827; transition: background 0.15s, border-color 0.15s;">
+                             <span style="color:#6b7280; font-size:14px;">☰</span>
+                             <span class="source-type {{ s.type }}" style="font-size:11px;">{{ s.type }}</span>
+                              <span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ s.name }}</span>
+                              {% if s.duration_label %}
+                                  <span style="color:#6ee7b7; font-size:11px;">{{ s.duration_label }}</span>
+                              {% endif %}
+                        </div>
                         {% endif %}
-                        <button class="btn btn-sm" onclick="editCal('{{ e.id }}')">Editar</button>
-                        <button class="btn btn-sm" onclick="toggleCal('{{ e.id }}')">
-                            {{ 'Desactivar' if e.enabled else 'Activar' }}
-                        </button>
-                        <button class="btn btn-sm btn-danger" onclick="deleteCal('{{ e.id }}')">Eliminar</button>
+                        {% endfor %}
                     </div>
-                </li>
-                {% endfor %}
-            </ul>
-            {% else %}
-                <div class="empty">No hay programas para hoy</div>
-            {% endif %}
-        </div>
+                    <div class="epg-col">
+                        <div class="day-programs">
+                            <div style="font-size:14px; font-weight:700;" id="epg-title">EPG</div>
+                            <div id="epg-body" class="empty">Haz doble click en una fuente para cargar EPG</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         <details style="margin-top:12px;" id="cal-details">
-            <summary style="cursor:pointer; font-size:14px; color:#93c5fd;">+ Añadir programa</summary>
+            <summary style="display:none;">Formulario añadir programa</summary>
             <div class="iptv-load-area">
+                <div class="input-row">
+                    <input type="text" id="cal-source-search" oninput="filterCalendarSourceOptions()" placeholder="Buscar fuente por nombre o tipo...">
+                    <select id="cal-source-type-filter" onchange="filterCalendarSourceOptions()" style="max-width:180px;">
+                        <option value="">Todos los tipos</option>
+                        <option value="youtube">YouTube</option>
+                        <option value="hls">HLS</option>
+                        <option value="iptv">IPTV</option>
+                        <option value="xtream">Xtream</option>
+                        <option value="presentation">Presentacion</option>
+                    </select>
+                </div>
                 <div class="input-row">
                     <select id="cal-source-id">
                         <option value="">-- Selecciona fuente --</option>
                         {% for s in sources %}
-                        <option value="{{ s.id }}">{{ s.name }}</option>
+                        {% if s.get('emit_enabled', True) %}
+                        <option value="{{ s.id }}" data-source-name="{{ s.name|lower }}" data-source-type="{{ s.type|lower }}">{{ s.name }} ({{ s.type }})</option>
+                        {% endif %}
                         {% endfor %}
                     </select>
                 </div>
@@ -439,7 +570,9 @@
                     <select id="edit-cal-source-id">
                         <option value="">-- Mantener fuente actual --</option>
                         {% for s in sources %}
+                        {% if s.get('emit_enabled', True) %}
                         <option value="{{ s.id }}">{{ s.name }}</option>
+                        {% endif %}
                         {% endfor %}
                     </select>
                 </div>
@@ -457,6 +590,7 @@
         <script>
         document.getElementById('cal-details').addEventListener('toggle', function() {
             if (this.open) {
+                filterCalendarSourceOptions();
                 var d = new Date();
                 var defaultTime = String(d.getHours()).padStart(2,'0') + ':' +
                     String(d.getMinutes()).padStart(2,'0');
@@ -585,43 +719,144 @@
             <h3>Enlaces</h3>
         </div>
         <div class="links">
-            <a href="/live.m3u8">/live.m3u8</a>
-            <a href="/live-max.m3u8">/live-max.m3u8</a>
-            <a href="/channels-max.m3u">/channels-max.m3u</a>
-            <a href="/channels.m3u">/channels.m3u</a>
-            <a href="/channels-emby-direct.m3u">/channels-emby-direct.m3u</a>
-            <a href="/guide.xml">/guide.xml</a>
-            <a href="/health">/health</a>
+            <div class="link-row"><a href="/live.m3u8">/live.m3u8</a><span class="link-desc">senal HLS en vivo estandar</span></div>
+            {% if processed_enabled %}
+            <div class="link-row"><a href="/processed/live.m3u8">/processed/live.m3u8</a><span class="link-desc">senal procesada (H.264/AAC)</span></div>
+            <div class="link-row"><a href="/emby/processed/live.m3u8">/emby/processed/live.m3u8</a><span class="link-desc">canal directo procesado para Emby</span></div>
+            <div class="link-row"><a href="/channels-processed.m3u">/channels-processed.m3u</a><span class="link-desc">lista M3U recomendada para Emby</span></div>
+            {% endif %}
+            <div class="link-row"><a href="/channels.m3u">/channels.m3u</a><span class="link-desc">lista M3U base de canales</span></div>
+            <div class="link-row"><a href="/guide.xml">/guide.xml</a><span class="link-desc">guia EPG en XMLTV</span></div>
+            <div class="link-row"><a href="/health">/health</a><span class="link-desc">estado de salud del servicio</span></div>
         </div>
+        {% if processed_enabled %}
+        <div style="font-size:13px; color:#9ca3af; margin-top:8px;">
+            Salida procesada activa (diferido 60s aprox, H.264/AAC 1080p para Emby).
+            {% if processed_error %}<span style="color:#fca5a5;">Error procesado: {{ processed_error }}</span>{% endif %}
+        </div>
+        {% endif %}
     </div>
 </main>
 
 <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+<script src="https://cdn.jsdelivr.net/npm/mpegts.js@latest"></script>
 <script>
     var previewVideo = document.getElementById('preview-video');
+    var calendarCounts = {{ calendar_counts | tojson }};
+    var calendarPrograms = {{ calendar_programs | tojson }};
+    var monthCursor = null;
+    var selectedSourceForEpg = null;
+    var tsPlayer = null;
+    var hlsPlayer = null;
+    var previewEnabled = localStorage.getItem('previewEnabled') !== '0';
+
+    // Estado del playout (declarado arriba para evitar ReferenceError en uso temprano)
+    var playoutStatus = {
+        current_entry: null,
+        next_entry: null,
+        connected: false,
+        source_map: {{ source_map | tojson }},
+        triggering_next: false,
+    };
+
+    function updatePreviewToggleUi() {
+        var btn = document.getElementById('preview-toggle-btn');
+        if (!btn) return;
+        btn.textContent = previewEnabled ? 'Preview ON' : 'Preview OFF';
+    }
+
+    function teardownPreviewPlayers() {
+        if (tsPlayer) {
+            tsPlayer.destroy();
+            tsPlayer = null;
+        }
+        if (hlsPlayer) {
+            hlsPlayer.destroy();
+            hlsPlayer = null;
+        }
+        if (previewVideo) {
+            previewVideo.pause();
+            previewVideo.removeAttribute('src');
+            previewVideo.load();
+        }
+    }
+
+    function togglePreview() {
+        previewEnabled = !previewEnabled;
+        localStorage.setItem('previewEnabled', previewEnabled ? '1' : '0');
+        updatePreviewToggleUi();
+        if (!previewEnabled) {
+            teardownPreviewPlayers();
+            return;
+        }
+        setupPlayer();
+    }
 
     function setupPlayer() {
         if (!previewVideo) return;
+        updatePreviewToggleUi();
+        if (!previewEnabled) {
+            teardownPreviewPlayers();
+            return;
+        }
         var playbackUrl = '{{ playback_url }}';
         var isHls = {{ 'true' if is_hls else 'false' }};
+        var isDirectTs = {{ 'true' if is_direct_ts else 'false' }};
 
         if (!playbackUrl || playbackUrl === 'None') return;
 
-        if (!isHls) {
+        teardownPreviewPlayers();
+
+        if (isHls) {
+            if (previewVideo.canPlayType('application/vnd.apple.mpegurl')) {
+                previewVideo.src = playbackUrl;
+            } else if (window.Hls && Hls.isSupported()) {
+                hlsPlayer = new Hls({ liveSyncDurationCount: 3 });
+                hlsPlayer.loadSource(playbackUrl);
+                hlsPlayer.attachMedia(previewVideo);
+                hlsPlayer.on(Hls.Events.MANIFEST_PARSED, function() {
+                    previewVideo.play().catch(function() {});
+                });
+            }
+        } else if (isDirectTs && window.mpegts && mpegts.getFeatureList().mseLivePlayback) {
+            tsPlayer = mpegts.createPlayer({ type: 'mpegts', isLive: true, url: playbackUrl });
+            tsPlayer.attachMediaElement(previewVideo);
+            tsPlayer.load();
+            previewVideo.play().catch(function() {});
+        } else if (!isHls) {
             previewVideo.src = playbackUrl;
             previewVideo.play().catch(function() {});
-        } else if (previewVideo.canPlayType('application/vnd.apple.mpegurl')) {
-            previewVideo.src = playbackUrl;
-        } else if (window.Hls && Hls.isSupported()) {
-            var hls = new Hls({ liveSyncDurationCount: 3 });
-            hls.loadSource(playbackUrl);
-            hls.attachMedia(previewVideo);
-            hls.on(Hls.Events.MANIFEST_PARSED, function() {
-                previewVideo.play().catch(function() {});
-            });
         }
     }
     setupPlayer();
+
+    function updateDigitalClock() {
+        var el = document.getElementById('digital-clock');
+        if (!el) return;
+        var now = new Date();
+        var hh = String(now.getHours()).padStart(2, '0');
+        var mm = String(now.getMinutes()).padStart(2, '0');
+        var ss = String(now.getSeconds()).padStart(2, '0');
+        el.textContent = hh + ':' + mm + ':' + ss;
+    }
+    updateDigitalClock();
+    setInterval(updateDigitalClock, 1000);
+
+    // Render inicial del calendario (mes y día seleccionado)
+    if (typeof renderMonthCalendar === 'function') renderMonthCalendar();
+    var initialDate = document.getElementById('cal-date');
+    if (initialDate && initialDate.value && typeof renderDayPrograms === 'function') {
+        renderDayPrograms(initialDate.value);
+    }
+
+    refreshPlayoutStatus();
+    renderUpcoming();
+    updateCountdown();
+    setInterval(function() {
+        updateCountdown();
+    }, 1000);
+    setInterval(refreshPlayoutStatus, 5000);
+    setInterval(refreshCalendar, 30000);
 
     function showError(msg) {
         var el = document.getElementById('error-top');
@@ -639,65 +874,17 @@
         fetch('/api/calendar', { method: 'POST', body: form })
             .then(function(r) { return r.json(); })
             .then(function(data) {
-                var list = document.getElementById('calendar-list');
                 var entries = data.entries || [];
-                var sMap = data.source_map || {};
-                if (entries.length === 0) {
-                    list.innerHTML = '<div class="empty">No hay programas para hoy</div>';
-                    return;
-                }
-                var html = '<ul class="cal-list" id="cal-list-today">';
-                entries.forEach(function(e, idx) {
-                    var statusTag = '';
-                    if (e.status === 'played') {
-                        statusTag = '<span class="tag cal-played">Emitido</span>';
-                    } else if (!e.enabled) {
-                        statusTag = '<span class="tag cal-disabled">Off</span>';
-                    } else {
-                        statusTag = '<span class="tag cal-enabled">Pendiente</span>';
-                    }
-                    var playBtn = e.enabled
-                        ? '<button class="btn btn-sm btn-success" onclick="playNow(\'' + e.id + '\')">Emitir</button>'
-                        : '';
-                    var toggleLabel = e.enabled ? 'Desactivar' : 'Activar';
-                    var timeHtml = e.start_mode === 'after_previous'
-                        ? '<span class="cal-after">Despues del anterior</span>'
-                        : '<span class="cal-time">' + e.time + '</span>';
-                    var durHtml = e.duration_label
-                        ? '<span class="cal-dur">' + escapeHtml(e.duration_label) + '</span>'
-                        : '';
-                    var endHtml = '';
-                    if (e.end_time) {
-                        endHtml = '<span class="cal-end">Fin ' + e.end_time + '</span>';
-                    } else if (e.start_mode === 'time' && e.time && !e.duration_seconds) {
-                        endHtml = '<span class="cal-depends">Depende del emisor</span>';
-                    } else if (e.start_mode === 'after_previous' && !e.end_time) {
-                        endHtml = '<span class="cal-depends">Depende del emisor</span>';
-                    }
-                    var overlapClass = '';
-                    var next = entries[idx + 1];
-                    if (e.end_time && next && next.time && e.end_time > next.time) {
-                        overlapClass = ' class="cal-overlap"';
-                    }
-                    html += '<li draggable="true" data-id="' + e.id + '"' + overlapClass + '>'
-                        + '<span class="drag-handle">☰</span>'
-                        + timeHtml
-                        + '<span class="cal-title">' + escapeHtml(e.title) + '</span>'
-                        + '<span class="cal-source">' + escapeHtml(sMap[e.source_id] || e.source_id) + '</span>'
-                        + durHtml
-                        + endHtml
-                        + statusTag
-                        + '<div class="actions">'
-                        + playBtn
-                        + '<button class="btn btn-sm" onclick="editCal(\'' + e.id + '\')">Editar</button>'
-                        + '<button class="btn btn-sm" onclick="toggleCal(\'' + e.id + '\')">' + toggleLabel + '</button>'
-                        + '<button class="btn btn-sm btn-danger" onclick="deleteCal(\'' + e.id + '\')">Eliminar</button>'
-                        + '</div>'
-                        + '</li>';
+                var sourceMap = data.source_map || {};
+                entries.forEach(function(e) {
+                    if (!e.source_name) e.source_name = sourceMap[e.source_id] || '';
                 });
-                html += '</ul>';
-                list.innerHTML = html;
-                setupDragDrop();
+                calendarPrograms[date] = entries;
+                if (entries.length) calendarCounts[date] = entries.length;
+                else delete calendarCounts[date];
+                renderMonthCalendar();
+                renderDayPrograms(date);
+                if (selectedSourceForEpg) renderEpgEntriesForSelectedDay();
             });
     }
 
@@ -707,8 +894,379 @@
         return d.innerHTML;
     }
 
-    function changeDate() {
+    function formatDateKey(d) {
+        var y = d.getFullYear();
+        var m = String(d.getMonth() + 1).padStart(2, '0');
+        var day = String(d.getDate()).padStart(2, '0');
+        return y + '-' + m + '-' + day;
+    }
+
+    function renderEpgEntriesForSelectedDay() {
+        var title = document.getElementById('epg-title');
+        var body = document.getElementById('epg-body');
+        if (!title || !body || !selectedSourceForEpg) return;
+        title.textContent = 'EPG de ' + (selectedSourceForEpg.name || selectedSourceForEpg.id);
+
+        var raw = body.dataset.epgEntries || '[]';
+        var entries = [];
+        try { entries = JSON.parse(raw); } catch (e) { entries = []; }
+
+        var selectedDate = document.getElementById('cal-date').value;
+        var now = new Date();
+        var todayKey = formatDateKey(now);
+        var isToday = selectedDate === todayKey;
+        var nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+        var visible = entries.filter(function(e) {
+            if (!isToday) return true;
+            var timeStr = (e.time || '').trim();
+            if (!timeStr || timeStr.indexOf(':') === -1) return true;
+            var parts = timeStr.split(':');
+            var hh = parseInt(parts[0], 10);
+            var mm = parseInt(parts[1], 10);
+            if (isNaN(hh) || isNaN(mm)) return true;
+            return (hh * 60 + mm) >= nowMinutes;
+        });
+
+        if (!visible.length) {
+            body.innerHTML = '';
+            body.parentElement.style.display = 'none';
+            return;
+        }
+        body.parentElement.style.display = '';
+
+        function fmtTime(iso) {
+            if (!iso) return '';
+            var d = String(iso).replace(/[^0-9]/g, '');
+            if (d.length < 12) return '';
+            return d.slice(8,10) + ':' + d.slice(10,12);
+        }
+        var html = '';
+        visible.forEach(function(e) {
+            var originalIndex = entries.indexOf(e);
+            var t = e.time || '--:--';
+            var end = fmtTime(e.end);
+            var timeRange = t + (end ? ' – ' + end : '');
+            var desc = e.description ? ('<div class="epg-meta">' + escapeHtml(e.description) + '</div>') : '';
+            html += '<div class="epg-item">'
+                + '<div><strong>' + escapeHtml(timeRange) + '</strong> · ' + escapeHtml(e.title || 'Programa') + '</div>'
+                + (e.start ? '<div class="epg-meta">' + escapeHtml(String(e.start).replace('T', ' ').slice(0, 16)) + (e.end ? ' → ' + escapeHtml(String(e.end).replace('T', ' ').slice(0, 16)) : '') + '</div>' : '')
+                + desc
+                + '<div style="margin-top:8px;"><button class="btn btn-sm btn-primary" onclick="addEpgEntryToCalendar(' + originalIndex + ')">Anadir</button></div>'
+                + '</div>';
+        });
+        body.className = '';
+        body.innerHTML = html;
+    }
+
+    var epgLoadingFor = null;
+
+    function loadSourceEpg(sourceId) {
+        if (epgLoadingFor === sourceId) return;
+        var title = document.getElementById('epg-title');
+        var body = document.getElementById('epg-body');
+        if (!body || !title) return;
+        document.querySelectorAll('.source-panel-item').forEach(function(it) {
+            it.classList.remove('epg-selected', 'epg-loading-item');
+        });
+        var row = document.querySelector('.source-panel-item[data-source-id="' + cssEscape(sourceId) + '"]');
+        if (row) row.classList.add('epg-loading-item');
+        epgLoadingFor = sourceId;
+        title.textContent = 'EPG — cargando…';
+        body.className = 'epg-loading';
+        body.innerHTML = '<div class="epg-spinner" aria-hidden="true"></div>'
+            + '<div class="epg-loading-text">Buscando programación del proveedor Xtream…<br>'
+            + '<span class="epg-loading-sub">Esto puede tardar unos segundos la primera vez</span></div>';
+        var form = new FormData();
+        form.append('source_id', sourceId);
+        fetch('/api/sources/epg', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (epgLoadingFor !== sourceId) return;
+                epgLoadingFor = null;
+                document.querySelectorAll('.source-panel-item').forEach(function(it) {
+                    it.classList.remove('epg-loading-item');
+                });
+                if (row) row.classList.add('epg-selected');
+                if (!data.ok) {
+                    title.textContent = 'EPG';
+                    body.className = 'empty';
+                    body.textContent = data.error || 'No se pudo cargar EPG';
+                    return;
+                }
+                selectedSourceForEpg = data.source;
+                body.dataset.epgEntries = JSON.stringify(data.entries || []);
+                renderEpgEntriesForSelectedDay();
+            })
+            .catch(function(err) {
+                if (epgLoadingFor !== sourceId) return;
+                epgLoadingFor = null;
+                document.querySelectorAll('.source-panel-item').forEach(function(it) {
+                    it.classList.remove('epg-loading-item');
+                });
+                if (row) row.classList.add('epg-selected');
+                title.textContent = 'EPG';
+                body.className = 'empty';
+                body.textContent = 'Error cargando EPG: ' + err.message;
+            });
+    }
+
+    function cssEscape(value) {
+        if (window.CSS && CSS.escape) return CSS.escape(value);
+        return String(value).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+    }
+
+    function addEpgEntryToCalendar(index) {
+        if (!selectedSourceForEpg) return;
+        var body = document.getElementById('epg-body');
+        var raw = body && body.dataset.epgEntries ? body.dataset.epgEntries : '[]';
+        var entries = [];
+        try { entries = JSON.parse(raw); } catch (e) { entries = []; }
+        var epg = entries[index];
+        if (!epg) return;
+        var date = document.getElementById('cal-date').value;
+        var form = new FormData();
+        form.append('date', date);
+        form.append('source_id', selectedSourceForEpg.id);
+        form.append('title', epg.title || 'Programa');
+        form.append('start', epg.start || '');
+        form.append('end', epg.end || '');
+        form.append('epg_channel_id', selectedSourceForEpg.xmltv_id || '');
+        form.append('epg_channel_name', selectedSourceForEpg.name || '');
+        form.append('epg_description', epg.description || '');
+        fetch('/api/calendar/add_from_epg', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) {
+                    refreshCalendar();
+                } else {
+                    showError(data.error || 'No se pudo anadir desde EPG');
+                }
+            });
+    }
+
+    function renderDayPrograms(dateKey) {
+        var title = document.getElementById('day-programs-title');
+        var body = document.getElementById('day-programs-body');
+        if (!title || !body) return;
+        title.textContent = 'Programas de ' + dateKey;
+        body.parentElement.style.display = '';
+        var items = calendarPrograms[dateKey] || [];
+        var html = '<ul id="day-programs-list" data-date="' + dateKey + '" style="list-style:none; padding-left:0; margin:8px 0 0; min-height:40px;">';
+        if (!items.length) {
+            html += '<div class="empty" style="padding:8px 0; color:#6b7280; font-size:13px;">No hay programas para este dia. Arrastra una fuente aqui.</div>';
+            html += '</ul>';
+            body.innerHTML = html;
+            setupDayProgramsDragDrop();
+            return;
+        }
+        html += '<li style="display:grid; grid-template-columns:24px 55px 55px 1fr 1.5fr 24px; gap:3px; padding:4px 4px; font-size:11px; color:#9ca3af; font-weight:700; border-bottom:1px solid #374151;">'
+            + '<span></span><span>Inicio</span><span>Fin</span><span>Canal</span><span>Programa</span><span></span>'
+            + '</li>';
+        items.forEach(function(e) {
+            var t = e.start_mode === 'after_previous' ? 'Despues del anterior' : (e.time || '--:--');
+            var progName = e.epg_title || e.title || 'Programa';
+            var endTime = e.epg_end_time || e.end_time || '';
+            html += '<li draggable="true" data-cal-id="' + e.id + '" style="display:grid; grid-template-columns:24px 55px 55px 1fr 1.5fr 24px; gap:3px; align-items:center; padding:4px; border-bottom:1px solid #1f2937; cursor:grab; font-size:12px;">'
+                + '<span class="drag-handle" style="cursor:grab; color:#6b7280; user-select:none;">&#9776;</span>'
+                + '<span style="color:#6ee7b7;">' + escapeHtml(t) + '</span>'
+                + '<span>' + escapeHtml(endTime) + '</span>'
+                + '<span style="color:#93c5fd; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + escapeHtml(e.source_name || '') + '</span>'
+                + '<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + escapeHtml(progName) + '</span>'
+                + '<button onclick="deleteCal(\'' + e.id + '\')" style="background:#7f1d1d; border:none; color:#fca5a5; border-radius:4px; padding:1px 4px; font-size:10px; cursor:pointer; line-height:1;" title="Eliminar">x</button>'
+                + '</li>';
+        });
+        html += '</ul>';
+        body.innerHTML = html;
+        setupDayProgramsDragDrop();
+    }
+
+    function setupDayProgramsDragDrop() {
+        var list = document.getElementById('day-programs-list');
+        if (!list) return;
+        if (list.dataset.dndList === '1') return;
+        list.dataset.dndList = '1';
+        var dragFromId = null;
+
+        list.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            var target = e.target;
+            while (target && target.tagName !== 'LI') { target = target.parentNode; }
+            if (!target || !target.dataset.calId || target.dataset.calId === dragFromId) return;
+            list.querySelectorAll('li[data-cal-id]').forEach(function(l) {
+                l.style.borderTop = '';
+                l.style.borderBottom = '';
+                l.style.background = '';
+            });
+            list.querySelectorAll('li:not([data-cal-id])').forEach(function(l) {
+                l.style.borderTop = '';
+                l.style.borderBottom = '';
+                l.style.borderLeft = '';
+                l.style.transform = '';
+                l.style.background = '';
+            });
+            var rect = target.getBoundingClientRect();
+            var y = e.clientY - rect.top;
+            var insertAfter = y > rect.height / 2;
+            if (insertAfter) {
+                target.style.borderBottom = '3px solid #3b82f6';
+            } else {
+                target.style.borderTop = '3px solid #3b82f6';
+            }
+            target.dataset.insertAfter = insertAfter ? '1' : '0';
+        });
+
+        list.addEventListener('drop', function(e) {
+            e.preventDefault();
+            list.querySelectorAll('li').forEach(function(l) {
+                l.classList.remove('dragging', 'drag-over');
+                l.style.borderTop = '';
+                l.style.borderBottom = '';
+                l.style.borderLeft = '';
+                l.style.transform = '';
+                l.style.background = '';
+            });
+            var transfer = e.dataTransfer.getData('text') || e.dataTransfer.getData('text/plain') || '';
+            var date = list.dataset.date;
+
+            if (transfer.indexOf('source:') === 0) {
+                var sourceId = transfer.split(':')[1];
+                if (!sourceId) return;
+                var form = new FormData();
+                form.append('date', date);
+                form.append('source_id', sourceId);
+                fetch('/api/calendar/add_from_source', { method: 'POST', body: form })
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data.ok) {
+                            var entries = data.entries || [];
+                            var smap = data.source_map || {};
+                            entries.forEach(function(e) {
+                                if (!e.source_name) e.source_name = smap[e.source_id] || '';
+                            });
+                            calendarPrograms[date] = entries;
+                            if (entries.length) calendarCounts[date] = entries.length;
+                            renderMonthCalendar();
+                            renderDayPrograms(date);
+                            if (selectedSourceForEpg) renderEpgEntriesForSelectedDay();
+                        } else {
+                            showError(data.error || 'Error al anadir');
+                        }
+                    });
+                return;
+            }
+
+            var target = e.target;
+            while (target && target.tagName !== 'LI') { target = target.parentNode; }
+            if (!target || !target.dataset.calId) return;
+            var fromId = transfer;
+            var toId = target.dataset.calId;
+            if (!fromId || fromId === toId) return;
+            var insertAfter = target.dataset.insertAfter === '1';
+            var allItems = list.querySelectorAll('li[data-cal-id]');
+            var ids = [];
+            allItems.forEach(function(l) {
+                if (l.dataset.calId === fromId) return;
+                if (!insertAfter && l.dataset.calId === toId) {
+                    ids.push(fromId);
+                }
+                ids.push(l.dataset.calId);
+                if (insertAfter && l.dataset.calId === toId) {
+                    ids.push(fromId);
+                }
+            });
+            var form = new FormData();
+            form.append('date', date);
+            form.append('ids', ids.join(','));
+            fetch('/api/calendar/reorder', { method: 'POST', body: form })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.ok) {
+                        var entries = data.entries || [];
+                        var smap = data.source_map || {};
+                        entries.forEach(function(e) {
+                            if (!e.source_name) e.source_name = smap[e.source_id] || '';
+                        });
+                        calendarPrograms[date] = entries;
+                        if (entries.length) calendarCounts[date] = entries.length;
+                        renderMonthCalendar();
+                        renderDayPrograms(date);
+                        if (selectedSourceForEpg) renderEpgEntriesForSelectedDay();
+                    } else {
+                        showError('Error al reordenar');
+                    }
+                });
+        });
+
+        var items = list.querySelectorAll('li');
+        items.forEach(function(li) {
+            if (li.dataset.dndCal === '1') return;
+            li.dataset.dndCal = '1';
+            li.addEventListener('dragstart', function(e) {
+                this.classList.add('dragging');
+                dragFromId = this.dataset.calId;
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text', this.dataset.calId);
+                e.dataTransfer.setData('text/plain', this.dataset.calId);
+            });
+            li.addEventListener('dragend', function(e) {
+                this.classList.remove('dragging');
+                dragFromId = null;
+                list.querySelectorAll('li').forEach(function(l) {
+                    l.classList.remove('drag-over');
+                    l.style.borderLeft = '';
+                    l.style.borderTop = '';
+                    l.style.borderBottom = '';
+                    l.style.transform = '';
+                    l.style.background = '';
+                });
+            });
+        });
+    }
+
+    function renderMonthCalendar() {
+        var dateInput = document.getElementById('cal-date');
+        var grid = document.getElementById('month-grid');
+        var label = document.getElementById('month-label');
+        if (!dateInput || !grid || !label) return;
+        var selected = new Date((dateInput.value || '') + 'T00:00:00');
+        if (isNaN(selected.getTime())) selected = new Date();
+        if (!monthCursor) monthCursor = new Date(selected.getFullYear(), selected.getMonth(), 1);
+        var year = monthCursor.getFullYear();
+        var month = monthCursor.getMonth();
+        label.textContent = monthCursor.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+        var firstDow = (new Date(year, month, 1).getDay() + 6) % 7;
+        var dim = new Date(year, month + 1, 0).getDate();
+        var html = ['<div class="month-weekday">L</div><div class="month-weekday">M</div><div class="month-weekday">X</div><div class="month-weekday">J</div><div class="month-weekday">V</div><div class="month-weekday">S</div><div class="month-weekday">D</div>'];
+        for (var i = 0; i < firstDow; i++) html.push('<div class="month-day muted"></div>');
+        for (var day = 1; day <= dim; day++) {
+            var d = new Date(year, month, day);
+            var key = formatDateKey(d);
+            var cls = 'month-day';
+            if (calendarCounts[key]) cls += ' has-items';
+            if (key === dateInput.value) cls += ' active';
+            html.push('<button class="' + cls + '" onclick="pickCalendarDate(\'' + key + '\')">' + day + '</button>');
+        }
+        grid.innerHTML = html.join('');
+    }
+
+    function pickCalendarDate(dateKey) {
+        document.getElementById('cal-date').value = dateKey;
+        monthCursor = new Date(dateKey + 'T00:00:00');
+        renderMonthCalendar();
+        renderDayPrograms(dateKey);
+        if (selectedSourceForEpg) renderEpgEntriesForSelectedDay();
         refreshCalendar();
+    }
+
+    function changeMonth(delta) {
+        if (!monthCursor) {
+            var d = new Date((document.getElementById('cal-date').value || '') + 'T00:00:00');
+            monthCursor = isNaN(d.getTime()) ? new Date() : new Date(d.getFullYear(), d.getMonth(), 1);
+        }
+        monthCursor = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + delta, 1);
+        renderMonthCalendar();
     }
 
     function addCalendar() {
@@ -1031,21 +1589,144 @@
             });
     }
 
+    function pad2(n) { return n.toString().padStart(2, '0'); }
+    function fmtHMS(totalSec) {
+        if (totalSec < 0) totalSec = 0;
+        var h = Math.floor(totalSec / 3600);
+        var m = Math.floor((totalSec % 3600) / 60);
+        var s = totalSec % 60;
+        return pad2(h) + ':' + pad2(m) + ':' + pad2(s);
+    }
+    function parseHM(s) {
+        if (!s || typeof s !== 'string') return null;
+        var parts = s.split(':');
+        if (parts.length < 2) return null;
+        var h = parseInt(parts[0], 10);
+        var m = parseInt(parts[1], 10);
+        var sec = parts.length > 2 ? parseInt(parts[2], 10) : 0;
+        if (isNaN(h) || isNaN(m)) return null;
+        return { h: h, m: m, s: isNaN(sec) ? 0 : sec };
+    }
+
+    function renderUpcoming() {
+        var row = document.getElementById('upcoming-row');
+        var currentBlock = document.getElementById('upcoming-current-block');
+        var nextBlock = document.getElementById('upcoming-next-block');
+        if (!row || !currentBlock || !nextBlock) return;
+
+        var cur = playoutStatus.current_entry;
+        var nxt = playoutStatus.next_entry;
+
+        if (!cur && !nxt) {
+            row.style.display = 'none';
+            return;
+        }
+        row.style.display = 'flex';
+
+        if (cur) {
+            currentBlock.style.display = 'flex';
+            document.getElementById('upcoming-current-title').textContent = cur.title || '-';
+            document.getElementById('upcoming-current-meta').textContent =
+                playoutStatus.source_map[cur.source_id] || cur.source_id || '';
+        } else {
+            currentBlock.style.display = 'none';
+        }
+
+        if (nxt) {
+            nextBlock.style.display = 'flex';
+            document.getElementById('upcoming-next-title').textContent = nxt.title || '-';
+            document.getElementById('upcoming-next-meta').textContent =
+                playoutStatus.source_map[nxt.source_id] || nxt.source_id || '';
+        } else {
+            nextBlock.style.display = 'none';
+        }
+    }
+
     function updateCountdown() {
-        var el = document.getElementById('countdown');
-        if (!el) return;
-        var nextTime = '{{ next_entry.time if next_entry else "" }}';
-        if (!nextTime) { el.textContent = ''; return; }
-        var parts = nextTime.split(':');
+        var currentBlock = document.getElementById('upcoming-current-block');
+        var nextBlock = document.getElementById('upcoming-next-block');
+        var currentTimeEl = document.getElementById('upcoming-current-time');
+        var nextTimeEl = document.getElementById('upcoming-next-time');
+        if (!currentTimeEl || !nextTimeEl) return;
+
         var now = new Date();
-        var target = new Date(now.getFullYear(), now.getMonth(), now.getDate(),
-            parseInt(parts[0]), parseInt(parts[1]), 0);
-        if (target <= now) { target.setDate(target.getDate() + 1); }
-        var diff = target - now;
-        var h = Math.floor(diff / 3600000);
-        var m = Math.floor((diff % 3600000) / 60000);
-        var s = Math.floor((diff % 60000) / 1000);
-        el.textContent = '(' + h.toString().padStart(2, '0') + ':' + m.toString().padStart(2, '0') + ':' + s.toString().padStart(2, '0') + ')';
+        var nowHM = pad2(now.getHours()) + ':' + pad2(now.getMinutes()) + ':' + pad2(now.getSeconds());
+
+        var cur = playoutStatus.current_entry;
+        var nxt = playoutStatus.next_entry;
+
+        // Tiempo restante del item en emisión
+        if (cur && cur.end_time) {
+            var endP = parseHM(cur.end_time);
+            if (endP) {
+                var endSec = endP.h * 3600 + endP.m * 60 + endP.s;
+                var nowSec = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+                var remain = endSec - nowSec;
+                if (remain < 0) remain = 0;
+                currentTimeEl.textContent = 'termina en ' + fmtHMS(remain);
+
+                // Parpadeo amarillo a 15 segundos
+                if (remain <= 15 && remain > 0) {
+                    if (!currentBlock.classList.contains('epg-warning')) {
+                        currentBlock.classList.add('epg-warning');
+                    }
+                } else {
+                    currentBlock.classList.remove('epg-warning');
+                }
+
+                // Salto automático a los 0 segundos
+                if (remain === 0 && !playoutStatus.triggering_next && cur.id) {
+                    triggerAutoNext();
+                }
+            } else {
+                currentTimeEl.textContent = '-';
+            }
+        } else if (cur) {
+            currentTimeEl.textContent = 'sin hora de fin';
+            currentBlock.classList.remove('epg-warning');
+        } else {
+            currentTimeEl.textContent = '-';
+        }
+
+        // Cuenta regresiva al inicio del siguiente
+        if (nxt && nxt.time) {
+            var tP = parseHM(nxt.time);
+            if (tP) {
+                var targetSec = tP.h * 3600 + tP.m * 60 + (tP.s || 0);
+                var nSec = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+                var diff = targetSec - nSec;
+                if (diff < 0) diff = 0;
+                nextTimeEl.textContent = 'empieza en ' + fmtHMS(diff);
+            } else {
+                nextTimeEl.textContent = '-';
+            }
+        } else {
+            nextTimeEl.textContent = '-';
+        }
+    }
+
+    function triggerAutoNext() {
+        playoutStatus.triggering_next = true;
+        fetch('/api/auto/next', { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                playoutStatus.triggering_next = false;
+                refreshPlayoutStatus();
+                refreshCalendar();
+            })
+            .catch(function() { playoutStatus.triggering_next = false; });
+    }
+
+    function refreshPlayoutStatus() {
+        fetch('/api/playout/status', { cache: 'no-store' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                playoutStatus.current_entry = data.current_entry;
+                playoutStatus.next_entry = data.next_entry;
+                playoutStatus.connected = data.connected;
+                renderUpcoming();
+            })
+            .catch(function() {});
     }
 
     function toggleAddForm() {
@@ -1058,139 +1739,69 @@
         if (!panel) return;
         var show = panel.style.display !== 'block';
         panel.style.display = show ? 'block' : 'none';
-        document.getElementById('sources-panel-btn').textContent = show ? 'Ocultar fuentes' : 'Fuentes';
+        document.getElementById('sources-panel-btn').textContent = show ? 'Ocultar sources' : 'Sources';
+        if (show) {
+            var input = document.getElementById('panel-source-search');
+            if (input) input.focus();
+        }
     }
 
-    function setupDragDrop() {
-        var ul = document.getElementById('cal-list-today');
-        var container = document.getElementById('calendar-list');
-        var dragSrcEl = null;
-        var dragIsSource = false;
-        var dragSourceId = null;
-
-        // Source panel items
+    function filterPanelSources() {
+        var q = (document.getElementById('panel-source-search').value || '').toLowerCase().trim();
+        var type = (document.getElementById('panel-source-type-filter').value || '').toLowerCase().trim();
         document.querySelectorAll('.source-panel-item').forEach(function(item) {
-            item.addEventListener('dragstart', function(e) {
-                dragIsSource = true;
-                dragSourceId = this.dataset.sourceId;
-                this.classList.add('dragging');
-                e.dataTransfer.effectAllowed = 'copy';
-                e.dataTransfer.setData('text', 'source:' + this.dataset.sourceId);
-            });
-            item.addEventListener('dragend', function(e) {
-                this.classList.remove('dragging');
-                document.querySelectorAll('.drag-over').forEach(function(el){el.classList.remove('drag-over')});
-            });
+            var name = (item.dataset.sourceName || '').toLowerCase();
+            var sourceType = (item.dataset.sourceType || '').toLowerCase();
+            var okText = !q || name.indexOf(q) !== -1 || sourceType.indexOf(q) !== -1;
+            var okType = !type || sourceType === type;
+            item.style.display = okText && okType ? 'flex' : 'none';
         });
+    }
 
-        function dropSourceAtEnd(date, sid) {
-            var form = new FormData();
-            form.append('date', date);
-            form.append('source_id', sid);
-            fetch('/api/calendar/add_from_source', { method: 'POST', body: form })
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    if (data.ok) refreshCalendar();
-                    else showError(data.error || 'Error al anadir desde fuente');
-                });
-        }
-
-        // Allow drops on the container itself (for empty list or append at end)
-        if (container) {
-            container.addEventListener('dragover', function(e) {
-                if (dragIsSource) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }
-            });
-            container.addEventListener('drop', function(e) {
-                if (dragIsSource && dragSourceId) {
-                    e.preventDefault();
-                    dropSourceAtEnd(document.getElementById('cal-date').value, dragSourceId);
-                }
-            });
-        }
-
-        // Allow drops on the empty state placeholder
-        document.querySelectorAll('#calendar-list .empty').forEach(function(el) {
-            el.addEventListener('dragover', function(e) {
-                if (dragIsSource) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }
-            });
-            el.addEventListener('drop', function(e) {
-                if (dragIsSource && dragSourceId) {
-                    e.preventDefault();
-                    dropSourceAtEnd(document.getElementById('cal-date').value, dragSourceId);
-                }
-            });
+    function filterCalendarSourceOptions() {
+        var q = (document.getElementById('cal-source-search').value || '').toLowerCase().trim();
+        var type = (document.getElementById('cal-source-type-filter').value || '').toLowerCase().trim();
+        var sel = document.getElementById('cal-source-id');
+        if (!sel) return;
+        var hadSelected = sel.value;
+        var keepSelected = false;
+        Array.prototype.forEach.call(sel.options, function(opt, idx) {
+            if (idx === 0) {
+                opt.hidden = false;
+                return;
+            }
+            var name = (opt.dataset.sourceName || opt.text || '').toLowerCase();
+            var sourceType = (opt.dataset.sourceType || '').toLowerCase();
+            var okText = !q || name.indexOf(q) !== -1 || sourceType.indexOf(q) !== -1;
+            var okType = !type || sourceType === type;
+            var visible = okText && okType;
+            opt.hidden = !visible;
+            if (visible && opt.value === hadSelected) keepSelected = true;
         });
+        if (!keepSelected) sel.value = '';
+    }
 
-        if (!ul) return;
-        var items = ul.querySelectorAll('li[draggable]');
+    var dragSrcEl = null;
+    var dragIsSource = false;
+    var dragSourceId = null;
 
-        items.forEach(function(item) {
+    function setupDragDrop() {
+        document.querySelectorAll('.source-panel-item').forEach(function(item) {
+            if (item.dataset.dndBound === '1') return;
+            item.dataset.dndBound = '1';
             item.addEventListener('dragstart', function(e) {
-                dragSrcEl = this;
-                dragIsSource = false;
-                this.classList.add('dragging');
-                e.dataTransfer.effectAllowed = 'move';
-                e.dataTransfer.setData('text', this.dataset.id);
-            });
-            item.addEventListener('dragend', function(e) {
-                this.classList.remove('dragging');
-                document.querySelectorAll('.drag-over').forEach(function(el){el.classList.remove('drag-over')});
-            });
-            item.addEventListener('dragover', function(e) {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = dragIsSource ? 'copy' : 'move';
-                document.querySelectorAll('.drag-over').forEach(function(el){el.classList.remove('drag-over')});
-                this.classList.add('drag-over');
-            });
-            item.addEventListener('dragleave', function(e) {
-                this.classList.remove('drag-over');
-            });
-            item.addEventListener('drop', function(e) {
-                e.preventDefault();
-                this.classList.remove('drag-over');
-                var date = document.getElementById('cal-date').value;
-                if (dragIsSource) {
-                    // Drop a source onto calendar entry - insert before this entry
-                    var sid = dragSourceId;
-                    var form = new FormData();
-                    form.append('date', date);
-                    form.append('source_id', sid);
-                    form.append('insert_before', this.dataset.id);
-                    fetch('/api/calendar/add_from_source', { method: 'POST', body: form })
-                        .then(function(r) { return r.json(); })
-                        .then(function(data) {
-                            if (data.ok) {
-                                refreshCalendar();
-                            } else {
-                                showError(data.error || 'Error al anadir desde fuente');
-                            }
-                        });
-                } else if (dragSrcEl && dragSrcEl !== this) {
-                    var all = ul.querySelectorAll('li[draggable]');
-                    var ids = [];
-                    all.forEach(function(li) { ids.push(li.dataset.id); });
-                    var srcIdx = ids.indexOf(dragSrcEl.dataset.id);
-                    var dstIdx = ids.indexOf(this.dataset.id);
-                    if (srcIdx > -1 && dstIdx > -1) {
-                        ids.splice(srcIdx, 1);
-                        ids.splice(dstIdx, 0, dragSrcEl.dataset.id);
-                    }
-                    var form = new FormData();
-                    form.append('date', date);
-                    form.append('ids', ids.join(','));
-                    fetch('/api/calendar/reorder', { method: 'POST', body: form })
-                        .then(function(r) { return r.json(); })
-                        .then(function(data) {
-                            if (data.ok) refreshCalendar();
-                            else showError(data.error || 'Error al reordenar');
-                        });
-                }
+                e.dataTransfer.effectAllowed = 'all';
+                var val = 'source:' + this.dataset.sourceId;
+                e.dataTransfer.setData('text', val);
+                e.dataTransfer.setData('text/plain', val);
             });
         });
     }
 
     // Init drag drop on page load
     setupDragDrop();
+    renderMonthCalendar();
+    renderDayPrograms(document.getElementById('cal-date').value);
 
     if (document.getElementById('countdown')) {
         setInterval(updateCountdown, 1000);
@@ -1289,3 +1900,12 @@
 </script>
 </body>
 </html>
+        function resolveDraggedSourceId(e) {
+            if (dragSourceId) return dragSourceId;
+            var transfer = (e && e.dataTransfer && e.dataTransfer.getData('text')) || '';
+            if (transfer.indexOf('source:') === 0) {
+                dragIsSource = true;
+                dragSourceId = transfer.split(':')[1] || null;
+            }
+            return dragSourceId;
+        }

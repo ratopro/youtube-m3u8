@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fuentes - Parrilla TV</title>
+    <title>Sources - Parrilla TV</title>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -30,6 +30,34 @@
             margin-bottom: 16px;
         }
 
+        .layout-columns {
+            display: grid;
+            grid-template-columns: 1fr 1.2fr;
+            gap: 16px;
+            align-items: start;
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .panel-header h3 { margin: 0; }
+
+        .panel-toggle {
+            color: #9ca3af;
+            font-size: 14px;
+            transition: transform 0.15s ease;
+        }
+
+        .card.collapsed .panel-toggle { transform: rotate(-90deg); }
+        .card.collapsed .panel-body { display: none; }
+
         .btn {
             background: #374151; border: 1px solid #4b5563; border-radius: 8px;
             color: #fff; cursor: pointer; font-size: 14px; font-weight: 600;
@@ -42,7 +70,7 @@
         .btn-danger:hover { background: #b91c1c; }
         .btn-success { background: #16a34a; border-color: #16a34a; }
         .btn-success:hover { background: #15803d; }
-        .btn-sm { padding: 4px 8px; font-size: 12px; }
+        .btn-sm { padding: 3px 5px; font-size: 11px; }
 
         .input-row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
         .input-row input, .input-row select {
@@ -53,10 +81,48 @@
 
         .iptv-load-area { border: 1px dashed #4b5563; border-radius: 8px; padding: 12px; margin-top: 8px; }
 
-        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .btn-epg { background: #7c3aed; color: #fff; }
+        .btn-epg:hover { background: #6d28d9; }
+
+        .epg-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000; display: none; align-items: center; justify-content: center; }
+        .epg-modal-bg.open { display: flex; }
+        .epg-modal { background: #111827; border: 1px solid #374151; border-radius: 10px; width: min(900px, 95vw); max-height: 90vh; display: flex; flex-direction: column; }
+        .epg-modal-header { padding: 14px 18px; border-bottom: 1px solid #374151; display: flex; align-items: center; gap: 10px; }
+        .epg-modal-header h3 { margin: 0; font-size: 16px; flex: 1; }
+        .epg-modal-body { padding: 12px 18px; overflow-y: auto; flex: 1; }
+        .epg-channel-row { border: 1px solid #1f2937; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; display: flex; gap: 12px; align-items: flex-start; }
+        .epg-channel-row.now-matched { border-color: #6ee7b7; }
+        .epg-channel-row .ch-name { font-weight: 600; color: #f9fafb; }
+        .epg-channel-row .ch-meta { font-size: 12px; color: #9ca3af; margin-top: 2px; }
+        .epg-channel-row .ch-now { flex: 1; }
+        .epg-channel-row .ch-now .now-title { color: #6ee7b7; font-weight: 600; }
+        .epg-channel-row .ch-now .now-time { color: #d1d5db; font-size: 12px; }
+        .epg-channel-row .ch-actions { display: flex; flex-direction: column; gap: 4px; min-width: 130px; }
+        .epg-channel-row .ch-actions input[type="date"] { background:#030712; color:#fff; border:1px solid #4b5563; border-radius:4px; font-size:12px; padding:4px 6px; }
+        .epg-empty { color: #9ca3af; padding: 12px; text-align: center; }
+
+        table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
         th { color: #9ca3af; text-align: left; padding: 8px 10px; border-bottom: 1px solid #374151; font-weight: 600; }
-        td { padding: 8px 10px; border-bottom: 1px solid #1f2937; vertical-align: middle; }
+        td { padding: 8px 10px; border-bottom: 1px solid #1f2937; vertical-align: middle; word-break: break-word; }
         tr:hover td { background: #111827; }
+        #sources-card th, #sources-card td { padding: 6px 8px; }
+        #sources-card th:nth-child(1), #sources-card td:nth-child(1) { width: 11%; }
+        #sources-card th:nth-child(2), #sources-card td:nth-child(2) { width: 8%; text-align: center; }
+        #sources-card th:nth-child(3), #sources-card td:nth-child(3) { width: 8%; text-align: center; }
+        #sources-card th:nth-child(4), #sources-card td:nth-child(4) { width: 56%; }
+        #sources-card th:nth-child(5), #sources-card td:nth-child(5) { width: 17%; }
+        #sources-card td:nth-child(4) { overflow: hidden; }
+        #sources-card td:nth-child(4) > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #sources-card th { cursor: pointer; user-select: none; }
+        #sources-card th[data-sort]:hover { color: #fff; }
+        #sources-card th .sort-arrow { color: #6b7280; font-size: 10px; margin-left: 4px; }
+        #sources-card th.sort-active { color: #fff; }
+        #sources-card th.sort-active .sort-arrow { color: #6ee7b7; }
+        #sources-card td:nth-child(2) { overflow: hidden; }
+        #sources-card td:nth-child(2) label { width: 100%; min-width: 0; }
+        #sources-card td:nth-child(2) label > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #sources-card .actions { gap: 2px; flex-wrap: nowrap; }
+        #sources-card .actions .btn { white-space: nowrap; }
 
         .source-type { font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: 600; white-space: nowrap; }
         .source-type.yt { background: #7c3aed; }
@@ -72,6 +138,12 @@
         .tag.err { background: #7f1d1d; color: #fca5a5; }
         .tag.pending { background: #1e3a5f; color: #93c5fd; }
         .tag.duration { background: #374151; color: #fbbf24; }
+        .emit-check {
+            width: 18px;
+            height: 18px;
+            accent-color: #22c55e;
+            cursor: pointer;
+        }
 
         .actions { display: flex; gap: 4px; flex-wrap: nowrap; white-space: nowrap; }
         .empty { color: #6b7280; font-size: 13px; padding: 24px 0; text-align: center; }
@@ -93,8 +165,34 @@
 
         .url-cell { word-break: break-all; max-width: 300px; }
 
+        .source-detail {
+            background: #0f172a;
+            border: 1px solid #1f2937;
+            border-radius: 8px;
+            margin: 6px 0 10px;
+            padding: 10px;
+        }
+
+        .source-detail-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 8px;
+            font-size: 12px;
+            color: #d1d5db;
+        }
+
+        .source-detail-grid .label {
+            color: #9ca3af;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            margin-bottom: 2px;
+        }
+
         @media (max-width: 700px) {
             body { padding: 12px; }
+            .layout-columns { grid-template-columns: 1fr; }
+            .source-detail-grid { grid-template-columns: 1fr; }
             table, thead, tbody, th, td, tr { display: block; }
             th { display: none; }
             td { padding: 6px 10px; }
@@ -122,66 +220,109 @@
 <body>
 <main>
     <div class="nav">
-        <h1 style="margin:0;">Fuentes</h1>
+        <h1 style="margin:0;">Sources</h1>
         <h2 style="margin:0; flex:1;">{{ app_version }}</h2>
         <a href="/" class="btn btn-primary">Volver a parrilla</a>
     </div>
 
     <div id="messages"></div>
 
-    <div style="display:grid; gap:16px; grid-template-columns:1fr 1fr;">
-        <div class="card">
-            <h3>Añadir YouTube</h3>
-            <div class="input-row">
-                <input type="text" id="yt-name" placeholder="Nombre (opcional)">
-                <input type="url" id="yt-url" placeholder="https://youtube.com/watch?v=...">
+    <div class="layout-columns">
+        <div>
+            <div class="card collapsible collapsed" id="panel-youtube">
+                <div class="panel-header" onclick="togglePanel('panel-youtube')">
+                    <h3>Añadir YouTube</h3>
+                    <span class="panel-toggle">▼</span>
+                </div>
+                <div class="panel-body">
+                    <div class="input-row">
+                        <input type="text" id="yt-name" placeholder="Nombre (opcional)">
+                        <input type="url" id="yt-url" placeholder="https://youtube.com/watch?v=...">
+                    </div>
+                    <button class="btn btn-primary" onclick="addYoutube()">Añadir</button>
+                </div>
             </div>
-            <button class="btn btn-primary" onclick="addYoutube()">Añadir</button>
-        </div>
 
-        <div class="card">
-            <h3>Añadir HLS directo</h3>
-            <div class="input-row">
-                <input type="text" id="hls-name" placeholder="Nombre (opcional)">
-                <input type="url" id="hls-url" placeholder="https://ejemplo.com/stream.m3u8">
-            </div>
-            <button class="btn btn-primary" onclick="addHls()">Añadir</button>
-        </div>
-
-        <div class="card" style="grid-column:1/-1;">
-            <h3>Cargar lista IPTV</h3>
-            <div class="input-row">
-                <input type="url" id="iptv-url" placeholder="https://ejemplo.com/lista.m3u">
-                <button class="btn btn-primary" onclick="loadIptv()">Cargar</button>
-            </div>
-            <div id="iptv-result" class="channels-result" style="display:none;">
-                <select id="iptv-channels-select" size="5"></select>
-                <div class="input-row" style="margin-top:6px;">
-                    <input type="text" id="iptv-channel-name" placeholder="Nombre del canal (opcional)">
-                    <button class="btn btn-success" onclick="addIptvChannel()">Añadir a fuentes</button>
+            <div class="card collapsible collapsed" id="panel-hls">
+                <div class="panel-header" onclick="togglePanel('panel-hls')">
+                    <h3>Añadir HLS directo</h3>
+                    <span class="panel-toggle">▼</span>
+                </div>
+                <div class="panel-body">
+                    <div class="input-row">
+                        <input type="text" id="hls-name" placeholder="Nombre (opcional)">
+                        <input type="url" id="hls-url" placeholder="https://ejemplo.com/stream.m3u8">
+                    </div>
+                    <button class="btn btn-primary" onclick="addHls()">Añadir</button>
                 </div>
             </div>
         </div>
 
-        <div class="card" style="grid-column:1/-1;">
-            <h3>Proveedores Xtream</h3>
-            <div id="iptv-providers-info" style="font-size:13px; color:#9ca3af; margin-bottom:8px;">
-                {{ iptv_providers|length }} proveedor(es) configurado(s)
+        <div>
+            <div class="card collapsible collapsed" id="panel-iptv">
+                <div class="panel-header" onclick="togglePanel('panel-iptv')">
+                    <h3>Cargar lista IPTV</h3>
+                    <span class="panel-toggle">▼</span>
+                </div>
+                <div class="panel-body">
+                    <div class="input-row">
+                        <input type="url" id="iptv-url" placeholder="https://ejemplo.com/lista.m3u">
+                        <button class="btn btn-primary" onclick="loadIptv()">Cargar</button>
+                    </div>
+                    <div id="iptv-result" class="channels-result" style="display:none;">
+                        <select id="iptv-channels-select" size="5"></select>
+                        <div class="input-row" style="margin-top:6px;">
+                            <input type="text" id="iptv-channel-name" placeholder="Nombre del canal (opcional)">
+                            <button class="btn btn-success" onclick="addIptvChannel()">Añadir a fuentes</button>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                <button class="btn btn-primary" onclick="importIptvSpain()">Importar España</button>
-                <button class="btn btn-sm" onclick="checkIptv()">Verificar canales ahora</button>
+
+            <div class="card collapsible collapsed" id="panel-xtream">
+                <div class="panel-header" onclick="togglePanel('panel-xtream')">
+                    <h3>Proveedores Xtream</h3>
+                    <span class="panel-toggle">▼</span>
+                </div>
+                <div class="panel-body">
+                    <div id="iptv-providers-info" style="font-size:13px; color:#9ca3af; margin-bottom:8px;">
+                        {{ iptv_providers|length }} proveedor(es) configurado(s)
+                    </div>
+                    <div id="iptv-providers-list" style="font-size:13px; margin-bottom:8px;"></div>
+                    <div class="input-row">
+                        <input type="text" id="provider-name" placeholder="Nombre de la lista/proveedor (ej. MEGAOTT)">
+                        <input type="text" id="provider-id" placeholder="ID opcional (ej. megaott)">
+                    </div>
+                    <div class="input-row">
+                        <input type="url" id="provider-dns" placeholder="DNS principal (http://panel.ejemplo.com:8080)">
+                        <input type="url" id="provider-dns-alt" placeholder="DNS alternativo (opcional)">
+                    </div>
+                    <div class="input-row">
+                        <input type="text" id="provider-username" placeholder="Usuario Xtream">
+                        <input type="password" id="provider-password" placeholder="Password Xtream">
+                        <button class="btn btn-success" onclick="addIptvProvider()">Guardar proveedor</button>
+                    </div>
+                    <div class="input-row" style="margin-top:6px;">
+                        <select id="provider-select" style="max-width:360px;">
+                            <option value="">Todos los proveedores</option>
+                        </select>
+                    </div>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <button class="btn btn-primary" onclick="importIptvSpain()">Importar España</button>
+                        <button class="btn btn-sm" onclick="checkIptv()">Verificar canales ahora</button>
+                    </div>
+                    <div id="iptv-import-result" style="margin-top:8px; font-size:13px;"></div>
+                </div>
             </div>
-            <div id="iptv-import-result" style="margin-top:8px; font-size:13px;"></div>
         </div>
     </div>
 
-    <div class="card" id="sources-card">
+    <div class="card" id="sources-card" style="margin-bottom:0;">
         <div class="section-header" style="display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap;">
-            <h3 style="margin:0;">Todas las fuentes</h3>
+            <h3 style="margin:0;">Sources</h3>
             <span id="source-count" style="font-size:13px; color:#9ca3af;"></span>
             <div style="margin-left:auto; display:flex; gap:6px; flex-wrap:wrap;">
-                <input type="text" id="source-name-filter" oninput="applyFilters()" placeholder="Buscar canal por nombre..." style="background:#030712; border:1px solid #4b5563; border-radius:6px; color:#fff; font-size:13px; padding:6px 10px; width:200px;">
+                <input type="text" id="source-name-filter" oninput="applyFilters()" placeholder="Buscar canal por nombre..." style="background:#030712; border:1px solid #4b5563; border-radius:6px; color:#fff; font-size:13px; padding:6px 10px; min-width:160px; flex:1;">
                 <select id="source-type-filter" onchange="applyFilters()" style="background:#030712; border:1px solid #4b5563; border-radius:6px; color:#fff; font-size:13px; padding:6px 10px;">
                     <option value="">Todos los tipos</option>
                     <option value="youtube">YouTube</option>
@@ -193,39 +334,191 @@
                 <select id="source-group-filter" onchange="applyFilters()" style="background:#030712; border:1px solid #4b5563; border-radius:6px; color:#fff; font-size:13px; padding:6px 10px;">
                     <option value="">Todos los grupos</option>
                 </select>
-                <input type="text" id="source-search" oninput="applyFilters()" placeholder="Buscar en fuentes..." style="background:#030712; border:1px solid #4b5563; border-radius:6px; color:#fff; font-size:13px; padding:6px 10px; width:170px;">
+                <select id="source-emit-filter" onchange="applyFilters()" style="background:#030712; border:1px solid #4b5563; border-radius:6px; color:#fff; font-size:13px; padding:6px 10px;">
+                    <option value="">Emitir: Todos</option>
+                    <option value="marked">Emitir: Marcados</option>
+                    <option value="unmarked">Emitir: No marcados</option>
+                </select>
+                <button class="btn btn-sm" onclick="setEmitForAll(true)">Marcar todos</button>
+                <button class="btn btn-sm" onclick="setEmitForAll(false)">Desmarcar todos</button>
                 <button class="btn btn-sm" onclick="refreshPage()">Recargar</button>
             </div>
         </div>
-        <div style="overflow-x:auto;">
+        <div>
         <table>
             <thead>
                 <tr>
-                    <th>Tipo</th>
-                    <th>Nombre</th>
-                    <th>Grupo</th>
-                    <th>URL</th>
-                    <th>Duracion</th>
-                    <th>Auto</th>
-                    <th>Val.</th>
-                    <th>Acciones</th>
+                    <th data-sort="type">Tipo</th>
+                    <th data-sort="auto">Auto</th>
+                    <th data-sort="visible">Visible</th>
+                    <th data-sort="name">Nombre</th>
+                    <th data-sort="group">Grupo</th>
                 </tr>
             </thead>
             <tbody id="sources-tbody">
             </tbody>
         </table>
         </div>
-        <div class="pagination" id="pagination"></div>
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-top:10px;">
+            <div style="display:flex; align-items:center; gap:6px; font-size:13px; color:#9ca3af;">
+                <span>Registros por página</span>
+                <select id="page-size-select" onchange="changePageSize()" style="background:#030712; border:1px solid #4b5563; border-radius:6px; color:#fff; font-size:13px; padding:4px 8px;">
+                    <option value="15" selected>15</option>
+                    <option value="30">30</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                    <option value="all">Todo</option>
+                </select>
+            </div>
+            <div class="pagination" id="pagination" style="margin-top:0;"></div>
+        </div>
     </div>
 </main>
 
 <script>
     var SOURCES = {{ sources | tojson }};
+    var IPTV_PROVIDERS = {{ iptv_providers | tojson }};
     var PAGE_SIZE = 15;
     var currentPage = 0;
+    var sortField = 'name';
+    var sortDir = 'asc';
 
-    function buildGroupFilter() {
+    function getSortValue(s, field) {
+        if (field === 'name') return (s.name || '').toLowerCase();
+        if (field === 'type') return (s.type || '').toLowerCase();
+        if (field === 'group') return (s.iptv_group || s.type || '').toLowerCase();
+        if (field === 'auto') return s.auto_enabled ? 1 : 0;
+        if (field === 'visible') return s.emit_enabled === false ? 0 : 1;
+        return '';
+    }
+
+    function sortSources(list) {
+        var arr = list.slice();
+        arr.sort(function(a, b) {
+            var va = getSortValue(a, sortField);
+            var vb = getSortValue(b, sortField);
+            if (va < vb) return sortDir === 'asc' ? -1 : 1;
+            if (va > vb) return sortDir === 'asc' ? 1 : -1;
+            return 0;
+        });
+        return arr;
+    }
+
+    function updateSortArrows() {
+        var ths = document.querySelectorAll('#sources-card th[data-sort]');
+        ths.forEach(function(th) {
+            var f = th.getAttribute('data-sort');
+            var arrow = th.querySelector('.sort-arrow');
+            if (arrow) arrow.remove();
+            if (f === sortField) {
+                th.classList.add('sort-active');
+                var a = document.createElement('span');
+                a.className = 'sort-arrow';
+                a.textContent = sortDir === 'asc' ? '▲' : '▼';
+                th.appendChild(a);
+            } else {
+                th.classList.remove('sort-active');
+            }
+        });
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('#sources-card th[data-sort]').forEach(function(th) {
+            th.addEventListener('click', function() {
+                var f = th.getAttribute('data-sort');
+                if (sortField === f) {
+                    sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+                } else {
+                    sortField = f;
+                    sortDir = 'asc';
+                }
+                currentPage = 0;
+                updateSortArrows();
+                renderPage();
+            });
+        });
+        updateSortArrows();
+    });
+
+    function saveCurrentPage() {
+        localStorage.setItem('sourcesCurrentPage', String(currentPage));
+    }
+
+    function initCurrentPage() {
+        var saved = localStorage.getItem('sourcesCurrentPage');
+        if (!saved) return;
+        var n = parseInt(saved, 10);
+        if (!isNaN(n) && n >= 0) currentPage = n;
+    }
+
+    function togglePanel(panelId) {
+        var panel = document.getElementById(panelId);
+        if (!panel) return;
+        panel.classList.toggle('collapsed');
+    }
+
+    function loadSourcesAndRender() {
+        var selectedGroup = document.getElementById('source-group-filter').value;
+        fetch('/api/sources')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                SOURCES = data || [];
+                buildGroupFilter(selectedGroup);
+                renderPage();
+            })
+            .catch(function(err) {
+                showMsg('Error recargando fuentes: ' + err.message, true);
+            });
+    }
+
+    function refreshProvidersUi() {
+        var info = document.getElementById('iptv-providers-info');
+        info.textContent = IPTV_PROVIDERS.length + ' proveedor(es) configurado(s)';
+        var sel = document.getElementById('provider-select');
+        sel.innerHTML = '<option value="">Todos los proveedores</option>';
+        var list = document.getElementById('iptv-providers-list');
+        list.innerHTML = '';
+        IPTV_PROVIDERS.forEach(function(p) {
+            var opt = document.createElement('option');
+            opt.value = p.id;
+            opt.textContent = p.name + ' (' + p.id + ')';
+            sel.appendChild(opt);
+
+            var item = document.createElement('div');
+            item.style.cssText = 'display:inline-flex; align-items:center; gap:6px; background:#1f2937; border-radius:6px; padding:4px 10px; margin:0 6px 6px 0;';
+            item.innerHTML = '<span>' + p.name + '</span> <span style="color:#9ca3af;font-size:11px;">(' + p.id + ')</span>';
+            var btn = document.createElement('button');
+            btn.textContent = 'Eliminar';
+            btn.style.cssText = 'background:#7f1d1d; border:none; color:#fca5a5; border-radius:4px; padding:2px 8px; font-size:11px; cursor:pointer;';
+            btn.onclick = function() {
+                if (!confirm('Eliminar proveedor "' + p.name + '" y todas sus fuentes?')) return;
+                var form = new FormData();
+                form.append('provider_id', p.id);
+                fetch('/api/iptv/providers/delete', { method: 'POST', body: form })
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (!data.ok) {
+                            showMsg(data.error || 'Error al eliminar proveedor', true);
+                            return;
+                        }
+                        var idx = IPTV_PROVIDERS.indexOf(p);
+                        if (idx !== -1) IPTV_PROVIDERS.splice(idx, 1);
+                        refreshProvidersUi();
+                        refreshPage();
+                        showMsg('Proveedor eliminado, ' + data.removed_sources + ' fuente(s) removidas', false);
+                    })
+                    .catch(function(err) {
+                        showMsg('Error de red: ' + err.message, true);
+                    });
+            };
+            item.appendChild(btn);
+            list.appendChild(item);
+        });
+    }
+
+    function buildGroupFilter(selectedGroup) {
         var sel = document.getElementById('source-group-filter');
+        sel.innerHTML = '<option value="">Todos los grupos</option>';
         var groups = {};
         SOURCES.forEach(function(s) {
             var g = s.iptv_group || s.type || 'otro';
@@ -237,76 +530,72 @@
             opt.textContent = g + ' (' + groups[g] + ')';
             sel.appendChild(opt);
         });
+        if (selectedGroup && sel.querySelector('option[value="' + selectedGroup + '"]')) {
+            sel.value = selectedGroup;
+        }
     }
 
     function getFiltered() {
         var groupFilter = document.getElementById('source-group-filter').value;
         var typeFilter = document.getElementById('source-type-filter').value;
+        var emitFilter = document.getElementById('source-emit-filter').value;
         var nameFilter = document.getElementById('source-name-filter').value.toLowerCase().trim();
-        var searchText = document.getElementById('source-search').value.toLowerCase().trim();
-        return SOURCES.filter(function(s) {
+        var filtered = SOURCES.filter(function(s) {
+            var emitEnabled = s.emit_enabled !== false;
             if (groupFilter && (s.iptv_group || s.type || 'otro') !== groupFilter) return false;
             if (typeFilter && s.type !== typeFilter) return false;
+            if (emitFilter === 'marked' && !emitEnabled) return false;
+            if (emitFilter === 'unmarked' && emitEnabled) return false;
             if (nameFilter && s.name.toLowerCase().indexOf(nameFilter) === -1) return false;
-            if (searchText) {
-                var haystack = (s.name + ' ' + s.url + ' ' + (s.iptv_group || '') + ' ' + s.type).toLowerCase();
-                if (haystack.indexOf(searchText) === -1) return false;
-            }
             return true;
         });
+        return sortSources(filtered);
     }
 
     function renderPage() {
         var filtered = getFiltered();
         var total = filtered.length;
-        var pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+        var pageSize = PAGE_SIZE === 'all' ? Math.max(1, total) : PAGE_SIZE;
+        var pages = Math.max(1, Math.ceil(total / pageSize));
         if (currentPage >= pages) currentPage = pages - 1;
-        var start = currentPage * PAGE_SIZE;
-        var pageData = filtered.slice(start, start + PAGE_SIZE);
+        if (currentPage < 0) currentPage = 0;
+        var start = currentPage * pageSize;
+        var pageData = filtered.slice(start, start + pageSize);
+        saveCurrentPage();
 
         document.getElementById('source-count').textContent = total + ' fuente(s)';
 
         var tbody = document.getElementById('sources-tbody');
         if (pageData.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="empty">No hay fuentes</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5" class="empty">No hay fuentes</td></tr>';
             document.getElementById('pagination').innerHTML = '';
             return;
         }
         var html = '';
         pageData.forEach(function(s) {
             var typeClass = s.type === 'youtube' ? 'yt' : s.type;
-            var durHtml = s.duration_label ? '<span class="tag duration">' + escapeHtml(s.duration_label) + '</span>' : '<span style="color:#6b7280;">-</span>';
             var autoClass = s.auto_enabled ? 'auto-yes' : 'auto-no';
             var autoLabel = s.auto_enabled ? 'ON' : 'OFF';
-            var valHtml = s.validation
-                ? '<span class="tag ' + (s.validation.status === 'ok' ? 'ok' : 'err') + '">' + (s.validation.status === 'ok' ? 'OK' : 'ERR') + '</span>'
-                : '<span class="tag pending">-</span>';
+            var emitEnabled = s.emit_enabled !== false;
             var group = s.iptv_group || s.type || '-';
             html += '<tr>'
                 + '<td><span class="source-type ' + typeClass + '">' + escapeHtml(s.type) + '</span></td>'
-                + '<td data-label="Nombre">' + escapeHtml(s.name) + '</td>'
+                + '<td data-label="Auto" style="text-align:center;"><span class="tag ' + autoClass + '" onclick="toggleAuto(\'' + s.id + '\')" style="cursor:pointer;">' + autoLabel + '</span></td>'
+                + '<td data-label="Visible" style="text-align:center;"><input type="checkbox" class="emit-check" ' + (emitEnabled ? 'checked' : '') + ' onchange="toggleEmit(\'' + s.id + '\', this.checked)"></td>'
+                + '<td data-label="Nombre"><span>' + escapeHtml(s.name) + '</span></td>'
                 + '<td data-label="Grupo" style="font-size:12px; color:#9ca3af;">' + escapeHtml(group) + '</td>'
-                + '<td data-label="URL" class="url-cell">' + escapeHtml(s.url) + '</td>'
-                + '<td data-label="Duracion">' + durHtml + '</td>'
-                + '<td data-label="Auto"><span class="tag ' + autoClass + '" onclick="toggleAuto(\'' + s.id + '\')" style="cursor:pointer;">' + autoLabel + '</span></td>'
-                + '<td data-label="Val.">' + valHtml + '</td>'
-                + '<td data-label="Acciones">'
-                + '<div class="actions">'
-                + '<button class="btn btn-sm" onclick="probeSource(\'' + s.id + '\')">Probar</button>'
-                + '<button class="btn btn-sm" onclick="editSource(\'' + s.id + '\')">Editar</button>'
-                + '<button class="btn btn-sm btn-danger" onclick="deleteSource(\'' + s.id + '\')">Eliminar</button>'
-                + '</div>'
-                + '<div class="inlined-form" id="edit-form-' + s.id + '">'
-                + '<input type="text" id="edit-name-' + s.id + '" value="' + escapeHtml(s.name) + '" placeholder="Nombre">'
-                + '<input type="url" id="edit-url-' + s.id + '" value="' + escapeHtml(s.url) + '" placeholder="URL">'
-                + '<button class="btn btn-sm btn-success" onclick="saveEdit(\'' + s.id + '\')">Guardar</button>'
-                + '<button class="btn btn-sm" onclick="cancelEdit(\'' + s.id + '\')">Cancelar</button>'
-                + '</div>'
-                + '</td>'
                 + '</tr>';
         });
         tbody.innerHTML = html;
         renderPagination(pages);
+    }
+
+    function toggleDetails(id, btn) {
+        var row = document.getElementById('details-' + id);
+        if (!row) return;
+        var open = row.style.display !== 'none';
+        row.style.display = open ? 'none' : '';
+        if (btn) btn.textContent = open ? 'Desplegar' : 'Recoger';
     }
 
     function renderPagination(pages) {
@@ -328,12 +617,32 @@
 
     function goPage(n) {
         currentPage = n;
+        saveCurrentPage();
         renderPage();
     }
 
     function applyFilters() {
         currentPage = 0;
+        saveCurrentPage();
         renderPage();
+    }
+
+    function changePageSize() {
+        var val = document.getElementById('page-size-select').value;
+        PAGE_SIZE = val === 'all' ? 'all' : parseInt(val, 10);
+        localStorage.setItem('sourcesPageSize', val);
+        currentPage = 0;
+        saveCurrentPage();
+        renderPage();
+    }
+
+    function initPageSize() {
+        var sel = document.getElementById('page-size-select');
+        var saved = localStorage.getItem('sourcesPageSize');
+        if (saved && sel.querySelector('option[value="' + saved + '"]')) {
+            sel.value = saved;
+            PAGE_SIZE = saved === 'all' ? 'all' : parseInt(saved, 10);
+        }
     }
 
     function escapeHtml(text) {
@@ -349,7 +658,9 @@
         setTimeout(function() { el.innerHTML = ''; }, 4000);
     }
 
-    function refreshPage() { location.reload(); }
+    function refreshPage() {
+        loadSourcesAndRender();
+    }
 
     function addYoutube() {
         var name = document.getElementById('yt-name').value.trim() || 'YouTube';
@@ -422,7 +733,40 @@
         form.append('source_id', id);
         fetch('/api/sources/toggle_auto', { method: 'POST', body: form })
             .then(function(r) { return r.json(); })
-            .then(function(d) { if (d.ok) { refreshPage(); } else { showMsg(d.error || 'Error', true); } });
+            .then(function(d) { if (d.ok) { loadSourcesAndRender(); } else { showMsg(d.error || 'Error', true); } });
+    }
+
+    function toggleEmit(id, enabled) {
+        var form = new FormData();
+        form.append('source_id', id);
+        form.append('emit_enabled', enabled ? '1' : '0');
+        fetch('/api/sources/update', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.ok) {
+                    loadSourcesAndRender();
+                } else {
+                    showMsg(d.error || 'Error', true);
+                }
+            });
+    }
+
+    function setEmitForAll(enabled) {
+        if (!SOURCES.length) {
+            showMsg('No hay fuentes para actualizar', true);
+            return;
+        }
+        var updates = SOURCES.map(function(s) {
+            var form = new FormData();
+            form.append('source_id', s.id);
+            form.append('emit_enabled', enabled ? '1' : '0');
+            return fetch('/api/sources/update', { method: 'POST', body: form }).then(function(r) { return r.json(); });
+        });
+        Promise.all(updates)
+            .then(function() {
+                loadSourcesAndRender();
+            })
+            .catch(function(err) { showMsg('Error actualizando fuentes: ' + err.message, true); });
     }
 
     function deleteSource(id) {
@@ -473,7 +817,10 @@
     function importIptvSpain() {
         var result = document.getElementById('iptv-import-result');
         result.innerHTML = '<div style="color:#9ca3af;">Importando canales españoles…</div>';
-        fetch('/api/iptv/import', { method: 'POST' })
+        var providerId = document.getElementById('provider-select').value;
+        var form = new FormData();
+        if (providerId) form.append('provider_id', providerId);
+        fetch('/api/iptv/import', { method: 'POST', body: form })
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 if (!data.ok) {
@@ -494,6 +841,36 @@
             });
     }
 
+    function addIptvProvider() {
+        var form = new FormData();
+        form.append('name', document.getElementById('provider-name').value.trim());
+        form.append('provider_id', document.getElementById('provider-id').value.trim());
+        form.append('dns', document.getElementById('provider-dns').value.trim());
+        form.append('dns_alt', document.getElementById('provider-dns-alt').value.trim());
+        form.append('username', document.getElementById('provider-username').value.trim());
+        form.append('password', document.getElementById('provider-password').value.trim());
+        fetch('/api/iptv/providers/add', { method: 'POST', body: form })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data.ok) {
+                    showMsg(data.error || 'Error al guardar proveedor', true);
+                    return;
+                }
+                IPTV_PROVIDERS.push(data.provider);
+                refreshProvidersUi();
+                document.getElementById('provider-name').value = '';
+                document.getElementById('provider-id').value = '';
+                document.getElementById('provider-dns').value = '';
+                document.getElementById('provider-dns-alt').value = '';
+                document.getElementById('provider-username').value = '';
+                document.getElementById('provider-password').value = '';
+                showMsg('Proveedor Xtream guardado', false);
+            })
+            .catch(function(err) {
+                showMsg('Error de red: ' + err.message, true);
+            });
+    }
+
     function checkIptv() {
         var result = document.getElementById('iptv-import-result');
         result.innerHTML = '<div style="color:#9ca3af;">Verificando canales IPTV…</div>';
@@ -511,8 +888,160 @@
             });
     }
 
+    var _EPG_STATE = { sourceId: null, channels: [] };
+
+    function openIptvChannels(sourceId) {
+        _EPG_STATE.sourceId = sourceId;
+        var src = SOURCES.find(function(s) { return s.id === sourceId; });
+        document.getElementById('epg-modal-title').textContent = 'Canales IPTV — ' + (src ? src.name : sourceId);
+        document.getElementById('epg-modal-body').innerHTML = '<div class="epg-empty">Cargando EPG del proveedor...</div>';
+        document.getElementById('epg-modal-bg').classList.add('open');
+        fetch('/api/sources/' + encodeURIComponent(sourceId) + '/epg_channels')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data.ok) {
+                    document.getElementById('epg-modal-body').innerHTML = '<div class="epg-empty">' + escapeHtml(data.error || 'Error') + '</div>';
+                    return;
+                }
+                _EPG_STATE.channels = data.channels || [];
+                var today = new Date().toISOString().slice(0, 10);
+                var note = '';
+                if (data.epg_error) {
+                    note = '<div class="error-msg" style="margin-bottom:8px;">EPG: ' + escapeHtml(data.epg_error) + '. Mostrando solo datos del canal.</div>';
+                } else if (data.epg_cached) {
+                    note = '<div class="epg-empty" style="margin-bottom:8px;">EPG servido desde cache local.</div>';
+                }
+                var html = note;
+                if (!_EPG_STATE.channels.length) {
+                    html += '<div class="epg-empty">No hay canales en esta categoria.</div>';
+                } else {
+                    html += '<div class="epg-empty" style="text-align:left;">Proveedor: ' + escapeHtml(data.provider_name) + ' · Grupo: ' + escapeHtml(data.group || '-') + ' · ' + _EPG_STATE.channels.length + ' canales</div>';
+                    function fmtTime(iso) {
+                        if (!iso) return '';
+                        var d = String(iso).replace(/[^0-9]/g, '');
+                        if (d.length < 12) return '';
+                        return d.slice(8,10) + ':' + d.slice(10,12);
+                    }
+                    _EPG_STATE.channels.forEach(function(ch) {
+                        var nowTitle = ch.now && ch.now.title ? ch.now.title : 'Sin programacion';
+                        var nowStart = ch.now ? fmtTime(ch.now.start) : '';
+                        var nowEnd = ch.now ? fmtTime(ch.now.end) : '';
+                        var nextTitle = ch.next && ch.next.title ? ch.next.title : '';
+                        var nextStart = ch.next ? fmtTime(ch.next.start) : '';
+                        var nextEnd = ch.next ? fmtTime(ch.next.end) : '';
+                        var matched = !!ch.xmltv_id;
+                        var timeRange = (nowStart && nowEnd) ? nowStart + ' – ' + nowEnd : nowStart;
+                        var nextTimeRange = (nextStart && nextEnd) ? nextStart + ' – ' + nextEnd : nextStart;
+                        html += '<div class="epg-channel-row' + (matched ? ' now-matched' : '') + '" data-stream="' + escapeHtml(String(ch.stream_id)) + '">'
+                            + '<div class="ch-now">'
+                            + '<div class="ch-name">' + escapeHtml(ch.name) + '</div>'
+                            + '<div class="ch-meta">Stream ' + escapeHtml(String(ch.stream_id)) + (ch.xmltv_id ? ' · EPG: ' + escapeHtml(ch.xmltv_id) : ' · sin EPG') + '</div>'
+                            + '<div style="margin-top:6px;">'
+                            + '<span class="now-title">Ahora: </span>' + escapeHtml(nowTitle) + (timeRange ? ' <span class="now-time">(' + timeRange + ')</span>' : '')
+                            + (nextTitle ? '<div class="ch-meta" style="margin-top:2px;">Siguiente: ' + escapeHtml(nextTitle) + (nextTimeRange ? ' <span class="now-time">(' + nextTimeRange + ')</span>' : '') + '</div>' : '')
+                            + '</div>'
+                            + '</div>'
+                            + '<div class="ch-actions">'
+                            + '<input type="date" value="' + today + '" data-role="epg-date">'
+                            + '<button class="btn btn-sm btn-success" data-role="epg-add" data-stream="' + escapeHtml(String(ch.stream_id)) + '" ' + (ch.now ? '' : 'disabled') + '>+ Ahora</button>'
+                            + '<button class="btn btn-sm" data-role="epg-add" data-stream="' + escapeHtml(String(ch.stream_id)) + '" data-mode="next" ' + (ch.next ? '' : 'disabled') + '>+ Siguiente</button>'
+                            + '<button class="btn btn-sm" data-role="epg-play" data-stream="' + escapeHtml(String(ch.stream_id)) + '">Reproducir</button>'
+                            + '</div>'
+                            + '</div>';
+                    });
+                }
+                document.getElementById('epg-modal-body').innerHTML = html;
+            })
+            .catch(function(err) {
+                document.getElementById('epg-modal-body').innerHTML = '<div class="epg-empty">Error: ' + escapeHtml(err.message) + '</div>';
+            });
+    }
+
+    function closeIptvChannels() {
+        document.getElementById('epg-modal-bg').classList.remove('open');
+    }
+
+    document.addEventListener('click', function(ev) {
+        var target = ev.target;
+        if (!target || !target.dataset) return;
+        var role = target.dataset.role;
+        if (role === 'epg-add' || role === 'epg-play') {
+            var row = target.closest('.epg-channel-row');
+            if (!row) return;
+            var streamId = target.dataset.stream;
+            var ch = _EPG_STATE.channels.find(function(c) { return String(c.stream_id) === String(streamId); });
+            if (!ch) return;
+            if (role === 'epg-play') {
+                var target0 = SOURCES.find(function(s) { return s.id === _EPG_STATE.sourceId; });
+                if (target0) playStream(target0);
+                return;
+            }
+            var prog = target.dataset.mode === 'next' ? ch.next : ch.now;
+            if (!prog) return;
+            var dateInput = row.querySelector('input[data-role="epg-date"]');
+            var dateVal = dateInput ? dateInput.value : new Date().toISOString().slice(0, 10);
+            var form = new FormData();
+            form.append('date', dateVal);
+            form.append('source_id', _EPG_STATE.sourceId);
+            form.append('title', prog.title || ch.name);
+            form.append('start', prog.start || '');
+            form.append('end', prog.end || '');
+            form.append('epg_channel_id', ch.xmltv_id || '');
+            form.append('epg_channel_name', ch.name);
+            form.append('epg_description', prog.description || '');
+            target.disabled = true;
+            target.textContent = '...';
+            fetch('/api/calendar/add_from_epg', { method: 'POST', body: form })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.ok) {
+                        showMsg('Anadido a la parrilla: ' + (prog.title || ch.name), false);
+                        target.textContent = target.dataset.mode === 'next' ? '+ Siguiente' : '+ Ahora';
+                        target.disabled = false;
+                    } else {
+                        showMsg(data.error || 'Error al anadir', true);
+                        target.textContent = target.dataset.mode === 'next' ? '+ Siguiente' : '+ Ahora';
+                        target.disabled = false;
+                    }
+                })
+                .catch(function(err) {
+                    showMsg('Error: ' + err.message, true);
+                    target.textContent = target.dataset.mode === 'next' ? '+ Siguiente' : '+ Ahora';
+                    target.disabled = false;
+                });
+        }
+    });
+
+    function playStream(source) {
+        fetch('/api/sources/' + encodeURIComponent(source.id) + '/play', { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) {
+                    showMsg('Reproduciendo: ' + source.name, false);
+                } else {
+                    showMsg(data.error || 'Error al reproducir', true);
+                }
+            })
+            .catch(function(err) { showMsg('Error: ' + err.message, true); });
+    }
+
+    initPageSize();
+    initCurrentPage();
+    refreshProvidersUi();
     buildGroupFilter();
     renderPage();
 </script>
+
+<div class="epg-modal-bg" id="epg-modal-bg" onclick="if(event.target===this) closeIptvChannels()">
+    <div class="epg-modal">
+        <div class="epg-modal-header">
+            <h3 id="epg-modal-title">Canales IPTV</h3>
+            <button class="btn btn-sm" onclick="closeIptvChannels()">Cerrar</button>
+        </div>
+        <div class="epg-modal-body" id="epg-modal-body">
+            <div class="epg-empty">Cargando...</div>
+        </div>
+    </div>
+</div>
 </body>
 </html>
