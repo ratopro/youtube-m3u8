@@ -382,52 +382,95 @@ def channels_for_category(provider: dict, category_id: str) -> list[dict]:
     return result
 
 
+def _resolve_group(provider: dict, category_map: dict, category_id: str, existing_group: str | None) -> str:
+    """Resolve a group name with proper priority: configured > api categories > GROUP_MAP > keep existing."""
+    cid = str(category_id).strip()
+    if not cid:
+        return existing_group or "Otros"
+
+    configured = provider.get("categories") or {}
+    if cid in configured:
+        return configured[cid]
+
+    if cid in category_map:
+        return category_map[cid]
+
+    if cid in GROUP_MAP:
+        return GROUP_MAP[cid]
+
+    return existing_group or "Otros"
+
+
 def import_provider_channels(
     provider: dict,
     playout_engine,
 ) -> dict:
-    """Import every live stream from an Xtream provider like netv does.
+    """Import every live stream from an Xtream provider.
+
+    Fetches all streams from:
+    1. get_live_streams (global list)
+    2. Per-category get_live_streams for every category in provider["categories"]
 
     Matches existing sources by (provider_id, stream_id) so re-imports don't
-    create duplicates; refreshes URL/name/group and marks new channels as
-    hidden (emit_enabled=False, auto_enabled=False) so they show up in
-    /sources but do not pollute the main player until the user opts-in.
+    create duplicates. Preserves emit_enabled/auto_enabled on update.
+    New channels are hidden by default (emit_enabled=False, auto_enabled=False).
     """
     category_map = fetch_provider_categories(provider)
-    streams = fetch_provider_streams(provider)
+    seen_ids: set[int] = set()
+    all_streams: list[dict] = []
+
+    try:
+        global_streams = fetch_provider_streams(provider)
+        for s in global_streams:
+            sid = s.get("stream_id")
+            if sid and sid not in seen_ids:
+                seen_ids.add(sid)
+                all_streams.append(s)
+    except Exception as exc:
+        errors = [f"get_live_streams global: {exc}"]
+
+    configured_cats = provider.get("categories") or {}
+    for cid in configured_cats:
+        try:
+            cat_streams = fetch_channels(provider, cid)
+            for s in cat_streams:
+                sid = s.get("stream_id")
+                if sid and sid not in seen_ids:
+                    seen_ids.add(sid)
+                    all_streams.append(s)
+        except Exception as exc:
+            errors.append(f"get_live_streams category {cid}: {exc}")
+
     imported = 0
     updated = 0
     skipped = 0
     errors: list[str] = []
 
-    for ch in streams:
+    for ch in all_streams:
         stream_id = ch.get("stream_id")
         name = (ch.get("name") or "").strip()
         if not stream_id or not name:
             skipped += 1
             continue
-        category_ids = ch.get("category_ids") or []
-        primary_cat_id = str(category_ids[0]) if category_ids else ""
-        group_name = category_map.get(primary_cat_id)
-        if not group_name:
-            if primary_cat_id in GROUP_MAP:
-                group_name = GROUP_MAP[primary_cat_id]
-            else:
-                group_name = "Otros"
-        url = xtream_live_url(provider, stream_id)
+
+        cat_id = str(ch.get("category_id") or "").strip()
 
         existing = playout_engine.find_source_by_provider_stream(provider["id"], stream_id)
+        url = xtream_live_url(provider, stream_id)
+
         if existing:
+            group = _resolve_group(provider, category_map, cat_id, existing.get("iptv_group"))
             updates = {
                 "name": name,
                 "url": url,
-                "iptv_category_id": primary_cat_id,
-                "iptv_group": group_name,
+                "iptv_category_id": cat_id,
+                "iptv_group": group,
             }
             playout_engine.update_source(existing["id"], updates)
             updated += 1
             continue
 
+        group = _resolve_group(provider, category_map, cat_id, None)
         new_source = {
             "name": name,
             "type": "iptv",
@@ -438,20 +481,20 @@ def import_provider_channels(
             "is_live": True,
             "iptv_provider": provider["id"],
             "iptv_stream_id": stream_id,
-            "iptv_category_id": primary_cat_id,
-            "iptv_group": group_name,
+            "iptv_category_id": cat_id,
+            "iptv_group": group,
         }
         playout_engine.add_source(new_source)
         imported += 1
 
     return {
         "provider_id": provider["id"],
-        "total": len(streams),
+        "total": len(all_streams),
         "imported": imported,
         "updated": updated,
         "skipped": skipped,
         "errors": errors,
-        "category_count": len(category_map),
+        "category_count": len(category_map) + len(configured_cats),
     }
 
 
