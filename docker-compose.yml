@@ -16,8 +16,14 @@ services:
       STATE_FILE: "data/state.json"
       TZ: "Europe/Madrid"
       APP_TZ: "Europe/Madrid"
+      FFMPEG_STARTUP_GRACE_SEC: "60"
+      PROCESSED_STARTUP_WAIT_SECONDS: "30"
+      PROCESSED_DELAY_SECONDS: "15"
+      VIDEO_ACCEL: "auto"
+      PROCESSED_VIDEO_ENCODER: "libx264"
+      PRESENTATION_VIDEO_ENCODER: "libx264"
     ports:
       - "5058:5000"
     volumes:
       - ./data:/app/data
-    restart: unless-stopped
+    restart: "no"

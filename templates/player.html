@@ -154,10 +154,24 @@
         .preview-card { padding: 0; }
         .preview-layout { display: flex; gap: 16px; padding: 16px; align-items: flex-start; }
         .preview-info { flex: 1; min-width: 0; }
-        .preview-player { width: 340px; flex-shrink: 0; }
-        .preview-player video {
+        .preview-player { flex-shrink: 0; }
+        .signal-monitors { display: flex; gap: 12px; }
+        .signal-panel { flex: 1; min-width: 0; }
+        .signal-label {
+            font-size: 11px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.5px; color: #9ca3af; margin-bottom: 6px;
+            display: flex; align-items: center; gap: 6px;
+        }
+        .signal-dot {
+            width: 8px; height: 8px; border-radius: 50%; background: #6b7280;
+            flex-shrink: 0;
+        }
+        .signal-dot.ok { background: #22c55e; }
+        .signal-dot.err { background: #ef4444; }
+        .signal-dot.warn { background: #f59e0b; }
+        .signal-panel video {
             width: 100%; border-radius: 8px; background: #000;
-            max-height: 190px; object-fit: contain; display: block;
+            max-height: 160px; object-fit: contain; display: block;
         }
         .preview-placeholder {
             width: 100%; height: 130px; background: #030712;
@@ -246,7 +260,40 @@
         @media (max-width: 700px) {
             .preview-layout { flex-direction: column; }
             .preview-player { width: 100%; }
+            .signal-monitors { flex-direction: column; }
         }
+
+        .logs-panel {
+            background: #0f172a; border: 1px solid #374151; border-radius: 8px;
+            margin-top: 12px; overflow: hidden;
+        }
+        .logs-header {
+            display: flex; align-items: center; gap: 10px;
+            padding: 8px 12px; background: #1e293b; border-bottom: 1px solid #374151;
+            font-size: 13px; font-weight: 600; color: #d1d5db;
+        }
+        .logs-header .log-status { margin-left: auto; display: flex; gap: 8px; }
+        .log-pipeline { display: flex; align-items: center; gap: 4px; }
+        .log-pipeline-dot { width: 6px; height: 6px; border-radius: 50%; }
+        .log-pipeline-dot.ok { background: #22c55e; }
+        .log-pipeline-dot.err { background: #ef4444; }
+        .log-pipeline-dot.off { background: #6b7280; }
+        .logs-body {
+            max-height: 140px; overflow-y: auto; padding: 8px 12px;
+            font-family: "Courier New", monospace; font-size: 12px;
+            line-height: 1.5; color: #9ca3af;
+            scrollbar-width: thin;
+        }
+        .logs-body::-webkit-scrollbar { width: 6px; }
+        .logs-body::-webkit-scrollbar-track { background: transparent; }
+        .logs-body::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+        .log-line { white-space: nowrap; }
+        .log-line.error { color: #f87171; }
+        .log-line.warn { color: #fbbf24; }
+        .log-line.info { color: #93c5fd; }
+        .logs-toggle { cursor: pointer; user-select: none; }
+        .logs-toggle::before { content: "▼ "; font-size: 10px; }
+        .logs-toggle.collapsed::before { content: "▶ "; }
 
         .modal-overlay {
             position: fixed; top: 0; left: 0; right: 0; bottom: 0;
@@ -371,6 +418,7 @@
             <span class="status-tag auto">Auto activo</span>
         {% endif %}
         <a href="/sources" class="btn btn-sm" style="margin-left:auto; text-decoration:none;">Fuentes</a>
+        <span class="encoder-badge" id="encoder-badge" style="display:none; font-size:12px; padding:3px 8px; border-radius:10px; font-weight:600;"></span>
     </div>
 
     {% if error %}
@@ -420,11 +468,42 @@
             </div>
             <div class="preview-player">
                 {% if connected %}
+                    <div class="signal-monitors">
+                        <div class="signal-panel" id="signal-input-panel">
+                            <div class="signal-label">
+                                <span class="signal-dot" id="input-dot"></span>
+                                ENTRADA REAL
+                            </div>
+                            <video id="input-preview-video" muted autoplay playsinline controls {% if mode == 'presentation' %}loop{% endif %}></video>
+                        </div>
+                        <div class="signal-panel" id="signal-output-panel">
+                            <div class="signal-label">
+                                <span class="signal-dot" id="output-dot"></span>
+                                SALIDA PROCESADA
+                            </div>
+                            <video id="processed-preview-video" muted autoplay playsinline controls {% if mode == 'presentation' %}loop{% endif %}></video>
+                        </div>
+                    </div>
                     <span class="preview-badge">EN DIRECTO</span>
-                    <video id="preview-video" muted autoplay playsinline controls {% if mode == 'presentation' %}loop{% endif %}></video>
                 {% else %}
                     <div class="preview-placeholder">Sin emision</div>
                 {% endif %}
+            </div>
+            <div class="logs-panel" id="logs-panel">
+                <div class="logs-header">
+                    <span class="logs-toggle collapsed" id="logs-toggle" onclick="toggleLogsPanel()">Logs</span>
+                    <span class="log-status">
+                        <span class="log-pipeline" title="Entrada">
+                            <span class="log-pipeline-dot off" id="log-dot-input"></span>
+                            <span style="font-size:11px;">IN</span>
+                        </span>
+                        <span class="log-pipeline" title="Salida">
+                            <span class="log-pipeline-dot off" id="log-dot-processed"></span>
+                            <span style="font-size:11px;">OUT</span>
+                        </span>
+                    </span>
+                </div>
+                <div class="logs-body" id="logs-body" style="display:none;"></div>
             </div>
         </div>
         <div class="upcoming-row" id="upcoming-row"{% if not current_entry and not next_entry %} style="display:none;"{% endif %}>
@@ -736,16 +815,20 @@
 <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 <script src="https://cdn.jsdelivr.net/npm/mpegts.js@latest"></script>
 <script>
-    var previewVideo = document.getElementById('preview-video');
+    var inputPreviewVideo = document.getElementById('input-preview-video');
+    var processedPreviewVideo = document.getElementById('processed-preview-video');
     var calendarCounts = {{ calendar_counts | tojson }};
     var calendarPrograms = {{ calendar_programs | tojson }};
     var monthCursor = null;
     var selectedSourceForEpg = null;
-    var tsPlayer = null;
-    var hlsPlayer = null;
+    var inputHlsPlayer = null;
+    var inputTsPlayer = null;
+    var processedHlsPlayer = null;
+    var processedTsPlayer = null;
     var previewEnabled = localStorage.getItem('previewEnabled') !== '0';
+    var logsCollapsed = true;
+    var logsInterval = null;
 
-    // Estado del playout (declarado arriba para evitar ReferenceError en uso temprano)
     var playoutStatus = {
         current_entry: null,
         next_entry: null,
@@ -770,29 +853,19 @@
     }
 
     function teardownPreviewPlayers() {
-        if (tsPlayer) {
-            tsPlayer.destroy();
-            tsPlayer = null;
-        }
-        if (hlsPlayer) {
-            hlsPlayer.destroy();
-            hlsPlayer = null;
-        }
-        if (previewVideo) {
-            previewVideo.pause();
-            try {
-                previewVideo.removeAttribute('src');
-            } catch (e) {}
-            previewVideo.src = '';
-            // Calling load() resets readyState and clears the
-            // displayed frame so the screen is fully black instead of
-            // freezing the last decoded image.
-            try { previewVideo.load(); } catch (e) {}
-        }
+        if (inputTsPlayer) { inputTsPlayer.destroy(); inputTsPlayer = null; }
+        if (inputHlsPlayer) { inputHlsPlayer.destroy(); inputHlsPlayer = null; }
+        if (processedTsPlayer) { processedTsPlayer.destroy(); processedTsPlayer = null; }
+        if (processedHlsPlayer) { processedHlsPlayer.destroy(); processedHlsPlayer = null; }
+        [inputPreviewVideo, processedPreviewVideo].forEach(function(v) {
+            if (!v) return;
+            v.pause();
+            try { v.removeAttribute('src'); } catch (e) {}
+            v.src = '';
+            try { v.load(); } catch (e) {}
+        });
         var wrapper = document.querySelector('.preview-player');
-        if (wrapper) {
-            wrapper.style.display = 'none';
-        }
+        if (wrapper) { wrapper.style.display = 'none'; }
     }
 
     function togglePreview() {
@@ -801,24 +874,71 @@
         if (!previewEnabled) {
             teardownPreviewPlayers();
             updatePreviewToggleUi();
+            if (logsInterval) { clearInterval(logsInterval); logsInterval = null; }
             return;
         }
         updatePreviewToggleUi();
         setupPlayer();
+        startLogsPolling();
+    }
+
+    function _setupVideoForUrl(videoEl, playerVars, url, isHls, isDirectTs, isDirectMp4) {
+        var hlsP = playerVars.hls;
+        var tsP = playerVars.ts;
+        if (isDirectMp4) {
+            videoEl.src = url;
+            videoEl.loop = true;
+            videoEl.muted = true;
+            videoEl.play().catch(function() {});
+        } else if (isHls) {
+            if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+                videoEl.src = url;
+            } else if (window.Hls && Hls.isSupported()) {
+                hlsP = new Hls({ liveSyncDurationCount: 3 });
+                hlsP.loadSource(url);
+                hlsP.attachMedia(videoEl);
+                hlsP.on(Hls.Events.MANIFEST_PARSED, function() {
+                    videoEl.play().catch(function() {});
+                });
+            }
+        } else if (isDirectTs && window.mpegts && mpegts.getFeatureList().mseLivePlayback) {
+            tsP = mpegts.createPlayer({ type: 'mpegts', isLive: true, url: url });
+            tsP.attachMediaElement(videoEl);
+            tsP.load();
+            videoEl.play().catch(function() {});
+        } else {
+            videoEl.src = url;
+            videoEl.play().catch(function() {});
+        }
+        return { hls: hlsP, ts: tsP };
     }
 
     function setupPlayer() {
-        if (!previewVideo) return;
+        if (!inputPreviewVideo || !processedPreviewVideo) return;
         if (!previewEnabled) {
             teardownPreviewPlayers();
             return;
         }
-        var playbackUrl = '{{ playback_url }}';
         var isHls = {{ 'true' if is_hls else 'false' }};
         var isDirectTs = {{ 'true' if is_direct_ts else 'false' }};
         var isDirectMp4 = {{ 'true' if is_direct_mp4 else 'false' }};
+        var mode = '{{ mode }}';
+        var playbackUrl = '{{ playback_url or "" }}';
 
-        if (!playbackUrl || playbackUrl === 'None') {
+        var inputUrl = null;
+        var processedUrl = null;
+        var isMp4Presentation = false;
+
+        if (mode === 'presentation') {
+            inputUrl = '/presentation.mp4';
+            processedUrl = null;
+            isMp4Presentation = true;
+        } else if (mode) {
+            inputUrl = '/preview/live.m3u8';
+            processedUrl = playbackUrl || '/emby/processed/live.m3u8';
+        }
+
+        if (!inputUrl) {
             var wrapper = document.querySelector('.preview-player');
             if (wrapper) wrapper.style.display = 'none';
             return;
@@ -830,36 +950,109 @@
 
         updatePreviewToggleUi();
 
-        if (isDirectMp4) {
-            previewVideo.src = playbackUrl;
-            previewVideo.loop = true;
-            previewVideo.muted = true;
-            previewVideo.play().catch(function() {});
-        } else if (isHls) {
-            if (previewVideo.canPlayType('application/vnd.apple.mpegurl')) {
-                previewVideo.src = playbackUrl;
-            } else if (window.Hls && Hls.isSupported()) {
-                hlsPlayer = new Hls({ liveSyncDurationCount: 3 });
-                hlsPlayer.loadSource(playbackUrl);
-                hlsPlayer.attachMedia(previewVideo);
-                hlsPlayer.on(Hls.Events.MANIFEST_PARSED, function() {
-                    previewVideo.play().catch(function() {});
-                });
-            }
-        } else if (isDirectTs && window.mpegts && mpegts.getFeatureList().mseLivePlayback) {
-            tsPlayer = mpegts.createPlayer({ type: 'mpegts', isLive: true, url: playbackUrl });
-            tsPlayer.attachMediaElement(previewVideo);
-            tsPlayer.load();
-            previewVideo.play().catch(function() {});
-        } else {
-            previewVideo.src = playbackUrl;
-            previewVideo.play().catch(function() {});
+        var signalOutputPanel = document.getElementById('signal-output-panel');
+        if (signalOutputPanel) {
+            signalOutputPanel.style.display = (mode === 'presentation') ? 'none' : '';
+        }
+        var outputDot = document.getElementById('output-dot');
+        if (outputDot) {
+            outputDot.className = 'signal-dot ' + (mode === 'presentation' ? 'warn' : 'err');
+        }
+
+        var useHls = !isMp4Presentation && isHls;
+        var useTs = !isMp4Presentation && isDirectTs;
+        var useMp4 = isMp4Presentation || isDirectMp4;
+
+        var inputVars = _setupVideoForUrl(inputPreviewVideo, { hls: null, ts: null }, inputUrl, useHls, useTs, useMp4);
+        inputHlsPlayer = inputVars.hls;
+        inputTsPlayer = inputVars.ts;
+
+        if (processedUrl) {
+            var procVars = _setupVideoForUrl(processedPreviewVideo, { hls: null, ts: null }, processedUrl, isHls, isDirectTs, isDirectMp4);
+            processedHlsPlayer = procVars.hls;
+            processedTsPlayer = procVars.ts;
         }
     }
-    // Always reflect the persisted preview state on initial load
-    // (e.g. user disabled it last session).
+
+    function toggleLogsPanel() {
+        logsCollapsed = !logsCollapsed;
+        var toggle = document.getElementById('logs-toggle');
+        var body = document.getElementById('logs-body');
+        if (toggle) toggle.classList.toggle('collapsed', logsCollapsed);
+        if (body) body.style.display = logsCollapsed ? 'none' : 'block';
+    }
+
+    function refreshLogs() {
+        fetch('/api/logs')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var inputDot = document.getElementById('input-dot');
+                var outputDot = document.getElementById('output-dot');
+                var logDotInput = document.getElementById('log-dot-input');
+                var logDotProcessed = document.getElementById('log-dot-processed');
+
+                if (inputDot) {
+                    if (data.mode === 'presentation') {
+                        inputDot.className = 'signal-dot ' + (data.presentation_alive ? 'ok' : 'warn');
+                    } else {
+                        inputDot.className = 'signal-dot ' + (data.preview_alive ? 'ok' : 'err');
+                    }
+                }
+                if (outputDot) {
+                    var outOk = data.processed_alive && data.mode !== 'presentation';
+                    outputDot.className = 'signal-dot ' + (outOk ? 'ok' : (data.mode === 'presentation' ? 'warn' : 'err'));
+                }
+                if (logDotInput) {
+                    if (data.mode === 'presentation') {
+                        logDotInput.className = 'log-pipeline-dot ' + (data.presentation_alive ? 'ok' : 'off');
+                    } else {
+                        logDotInput.className = 'log-pipeline-dot ' + (data.preview_alive ? 'ok' : 'off');
+                    }
+                }
+                if (logDotProcessed) {
+                    var procOk = data.processed_alive && data.mode !== 'presentation';
+                    logDotProcessed.className = 'log-pipeline-dot ' + (procOk ? 'ok' : 'off');
+                }
+
+                if (!logsCollapsed) {
+                    var allLogs = [];
+                    if (data.preview && data.preview.length) {
+                        allLogs.push({ pipe: 'IN', lines: data.preview, alive: data.preview_alive });
+                    }
+                    if (data.processed && data.processed.length && data.mode !== 'presentation') {
+                        allLogs.push({ pipe: 'OUT', lines: data.processed, alive: data.processed_alive });
+                    }
+                    if (data.presentation && data.presentation.length && data.mode === 'presentation') {
+                        allLogs.push({ pipe: 'PRES', lines: data.presentation, alive: data.presentation_alive });
+                    }
+
+                    var html = '';
+                    allLogs.forEach(function(grp) {
+                        grp.lines.forEach(function(line) {
+                            var cls = 'log-line';
+                            if (/\b(err|fail|error|cannot|unable|denied)\b/i.test(line)) cls += ' error';
+                            else if (/\b(warn|timeout|retry)\b/i.test(line)) cls += ' warn';
+                            else if (/\[info\]|starting|restart/i.test(line)) cls += ' info';
+                            html += '<div class="' + cls + '">[' + grp.pipe + '] ' + escapeHtml(line) + '</div>';
+                        });
+                    });
+                    if (!html) html = '<div class="log-line" style="color:#6b7280;">Sin logs recientes</div>';
+                    var body = document.getElementById('logs-body');
+                    if (body) body.innerHTML = html;
+                }
+            })
+            .catch(function() {});
+    }
+
+    function startLogsPolling() {
+        if (logsInterval) clearInterval(logsInterval);
+        refreshLogs();
+        logsInterval = setInterval(refreshLogs, 5000);
+    }
+
     updatePreviewToggleUi();
     setupPlayer();
+    if (previewEnabled) startLogsPolling();
 
     function updateDigitalClock() {
         var el = document.getElementById('digital-clock');
@@ -884,11 +1077,13 @@
     refreshPlayoutStatus();
     renderUpcoming();
     updateCountdown();
+    refreshEncoderBadge();
     setInterval(function() {
         updateCountdown();
     }, 1000);
     setInterval(refreshPlayoutStatus, 5000);
     setInterval(refreshCalendar, 30000);
+    setInterval(refreshEncoderBadge, 30000);
 
     function showError(msg) {
         var el = document.getElementById('error-top');
@@ -897,6 +1092,27 @@
             el.style.display = 'block';
             setTimeout(function() { el.style.display = 'none'; }, 5000);
         }
+    }
+
+    function refreshEncoderBadge() {
+        fetch('/api/gpu/status')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var badge = document.getElementById('encoder-badge');
+                if (!badge) return;
+                var isHw = data.encoder_mode === 'hw';
+                var enc = isHw ? 'h264_nvenc' : 'libx264';
+                badge.textContent = (isHw ? 'HW' : 'SW') + ' · ' + enc;
+                badge.style.display = '';
+                badge.style.background = isHw ? '#166534' : '#374151';
+                badge.style.color = isHw ? '#86efac' : '#d1d5db';
+                if (data.has_cuda_devices && data.nvenc_available) {
+                    badge.title = 'GPU: ' + (data.nvidia_smi || 'NVIDIA detectada');
+                } else {
+                    badge.title = 'Codificacion por software';
+                }
+            })
+            .catch(function() {});
     }
 
     function refreshCalendar() {

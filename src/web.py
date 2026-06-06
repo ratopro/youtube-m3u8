@@ -22,6 +22,117 @@ log = logging.getLogger("youtube_hls.web")
 
 from src.playout import PlayoutEngine
 from src.youtube_extractor import StreamExtractor
+
+
+def is_direct_stream_url(url: str) -> bool:
+    if not url:
+        return False
+    lowered = url.lower()
+    return any(lowered.endswith(ext) for ext in (".m3u8", ".ts", ".mp4", ".mkv", ".mov", ".m4v"))
+
+
+nvenc_available: bool | None = None
+video_accel = "cpu"
+processed_video_encoder = "libx264"
+presentation_video_encoder = "libx264"
+
+
+def _hls_url_for_source(url: str, source_type: str) -> str | None:
+    if source_type in ("iptv", "hls") or is_direct_stream_url(url):
+        return url
+    try:
+        return StreamExtractor(url).get_hls_url()
+    except Exception:
+        return None
+
+
+def _check_and_refresh_source_url(source: dict) -> bool:
+    provider_id = source.get("iptv_provider")
+    stream_id = source.get("iptv_stream_id")
+    if not provider_id or not stream_id:
+        return False
+    provider = get_provider(provider_id)
+    if not provider:
+        return False
+    current_url = xtream_live_url(provider, int(stream_id))
+    if current_url == source.get("url"):
+        return False
+    log.info(f"URL rotated for {source['name']}: refreshing from {source.get('url', '')[:60]} -> {current_url[:60]}")
+    playout.update_source(source["id"], {"url": current_url})
+    return True
+
+
+def _check_nvenc() -> bool:
+    global nvenc_available
+    if nvenc_available is not None:
+        return nvenc_available
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-encoders"],
+            capture_output=True, text=True, timeout=10,
+        )
+        nvenc_available = "h264_nvenc" in r.stdout
+    except Exception:
+        nvenc_available = False
+    return nvenc_available
+
+
+def _gpu_status() -> dict:
+    has_cuda_devices = Path("/dev/nvidia0").exists()
+    has_nvenc = _check_nvenc()
+    nvidia_smi = None
+    try:
+        r = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader"],
+                           capture_output=True, text=True, timeout=10)
+        if r.returncode == 0:
+            nvidia_smi = r.stdout.strip()
+    except Exception:
+        pass
+    active_processed = _resolve_encoder(processed_video_encoder)
+    active_presentation = _resolve_encoder(presentation_video_encoder)
+    return {
+        "video_accel": video_accel,
+        "has_cuda_devices": has_cuda_devices,
+        "nvenc_available": has_nvenc,
+        "nvidia_smi": nvidia_smi,
+        "processed_encoder": processed_video_encoder,
+        "presentation_encoder": presentation_video_encoder,
+        "active_processed_encoder": active_processed,
+        "active_presentation_encoder": active_presentation,
+        "encoder_mode": "hw" if active_processed == "h264_nvenc" else "sw",
+    }
+
+
+def _resolve_encoder(requested_encoder: str) -> str:
+    if requested_encoder == "h264_nvenc" and _check_nvenc() and Path("/dev/nvidia0").exists():
+        return "h264_nvenc"
+    return "libx264"
+
+
+def _build_video_encoder_args(encoder: str, bitrate: str, maxrate: str, bufsize: str) -> list[str]:
+    if encoder == "h264_nvenc":
+        return [
+            "-c:v", "h264_nvenc",
+            "-preset", "p4",
+            "-rc", "cbr",
+            "-b:v", bitrate,
+            "-maxrate", maxrate,
+            "-bufsize", bufsize,
+            "-profile:v", "high",
+            "-pix_fmt", "yuv420p",
+        ]
+    return [
+        "-c:v", "libx264",
+        "-preset", processed_preset,
+        "-profile:v", "high",
+        "-level", "4.1",
+        "-pix_fmt", "yuv420p",
+        "-b:v", bitrate,
+        "-maxrate", maxrate,
+        "-bufsize", bufsize,
+    ]
+
+
 from src.football_api import get_today_matches
 from src.iptv_importer import (
     add_provider,
@@ -43,6 +154,7 @@ from src import epg_store
 from src.timeutils import now, now_date, now_hm, now_hms, now_iso
 from src.ffmpeg_supervisor import (
     STALL_TIMEOUT_SEC,
+    STARTUP_GRACE_SEC,
     Supervisor,
     SupervisorConfig,
     cleanup_orphans,
@@ -388,12 +500,18 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
     processed_audio_bitrate = os.environ.get("PROCESSED_AUDIO_BITRATE", "160k")
     processed_preset = os.environ.get("PROCESSED_PRESET", "veryfast")
     processed_height = int(os.environ.get("PROCESSED_HEIGHT", "1080"))
+    processed_startup_wait_seconds = int(os.environ.get("PROCESSED_STARTUP_WAIT_SECONDS", "30"))
     proxy_signing_key = os.environ.get("PROXY_SIGNING_KEY") or secrets.token_urlsafe(32)
     allow_unsigned_proxy = os.environ.get("ALLOW_UNSIGNED_PROXY", "0") == "1"
     epg_store.init_db()
     processed_delay_segments = max(1, math.ceil(processed_delay_seconds / max(1, processed_segment_seconds)))
     processed_effective_list_size = max(processed_list_size, processed_delay_segments + processed_extra_segments)
     processed_delete_threshold = max(4, processed_extra_segments)
+    global video_accel, processed_video_encoder, presentation_video_encoder, nvenc_available
+    video_accel = os.environ.get("VIDEO_ACCEL", "cpu")
+    processed_video_encoder = os.environ.get("PROCESSED_VIDEO_ENCODER", "libx264")
+    presentation_video_encoder = os.environ.get("PRESENTATION_VIDEO_ENCODER", "libx264")
+    nvenc_available = None
     stream_state = {
         "mode": "youtube" if upstream_hls_url else None,
         "source_url": None,
@@ -412,7 +530,22 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         "current_source_id": None,
         "current_reason": None,
         "current_calendar_id": None,
+        "logs": {"preview": [], "processed": [], "presentation": []},
     }
+
+    MAX_LOG_LINES = 100
+
+    def _drain_stderr(proc: subprocess.Popen, key: str) -> None:
+        try:
+            for raw in iter(proc.stderr.readline, b""):
+                line = raw.decode("utf-8", errors="replace").rstrip()
+                if line:
+                    buf = stream_state["logs"][key]
+                    buf.append(line)
+                    if len(buf) > MAX_LOG_LINES:
+                        buf.pop(0)
+        except Exception:
+            pass
 
     def stop_presentation_stream() -> None:
         kill_process(stream_state.get("presentation_proc"))
@@ -424,11 +557,12 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         stream_state["preview_stream_id"] = None
 
     def start_preview_stream(input_url: str) -> None:
+        proc = stream_state.get("preview_proc")
+        current_url = stream_state.get("preview_url")
+        if current_url == input_url and proc is not None and proc.poll() is None:
+            return
         stop_preview_stream()
         preview_hls_dir.mkdir(parents=True, exist_ok=True)
-        for item in preview_hls_dir.iterdir():
-            if item.is_file():
-                item.unlink(missing_ok=True)
 
         output_playlist = preview_hls_dir / "live.m3u8"
         segment_pattern = preview_hls_dir / "seg_%06d.ts"
@@ -463,9 +597,10 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             str(segment_pattern),
             str(output_playlist),
         ]
-        stream_state["preview_proc"] = subprocess.Popen(cmd)
+        stream_state["preview_proc"] = subprocess.Popen(cmd, stderr=subprocess.PIPE)
         stream_state["preview_stream_id"] = stream_state["stream_id"]
         stream_state["preview_url"] = input_url
+        threading.Thread(target=_drain_stderr, args=(stream_state["preview_proc"], "preview"), daemon=True).start()
 
     def stop_processed_stream() -> None:
         kill_process(stream_state.get("processed_proc"))
@@ -484,6 +619,10 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         output_playlist = processed_hls_dir / "live.m3u8"
         segment_pattern = processed_hls_dir / "seg_%06d.ts"
         scale_filter = f"scale=w=-2:h={processed_height}:force_original_aspect_ratio=decrease,pad=ceil(iw/2)*2:ceil(ih/2)*2"
+        use_encoder = _resolve_encoder(processed_video_encoder)
+        encoder_args = _build_video_encoder_args(
+            use_encoder, processed_video_bitrate, processed_video_maxrate, processed_video_bufsize,
+        )
         cmd = [
             "ffmpeg",
             "-hide_banner",
@@ -503,30 +642,17 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "0:a:0?",
             "-vf",
             scale_filter,
-            "-c:v",
-            "libx264",
-            "-preset",
-            processed_preset,
-            "-profile:v",
-            "high",
-            "-level",
-            "4.1",
-            "-pix_fmt",
-            "yuv420p",
-            "-r",
-            "25",
+        ]
+        cmd.extend(encoder_args)
+        if use_encoder != "h264_nvenc":
+            cmd.extend(["-r", "25"])
+        cmd.extend([
             "-g",
             "50",
             "-keyint_min",
             "50",
             "-sc_threshold",
             "0",
-            "-b:v",
-            processed_video_bitrate,
-            "-maxrate",
-            processed_video_maxrate,
-            "-bufsize",
-            processed_video_bufsize,
             "-c:a",
             "aac",
             "-b:a",
@@ -550,11 +676,16 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "-hls_segment_filename",
             str(segment_pattern),
             str(output_playlist),
-        ]
-        stream_state["processed_proc"] = subprocess.Popen(cmd)
+        ])
+        try:
+            stream_state["processed_proc"] = subprocess.Popen(cmd, stderr=subprocess.PIPE)
+        except Exception as exc:
+            stream_state["processed_error"] = f"No se pudo iniciar ffmpeg: {exc}"
+            return
         stream_state["processed_stream_id"] = stream_state["stream_id"]
         stream_state["processed_url"] = input_url
         stream_state["processed_error"] = None
+        threading.Thread(target=_drain_stderr, args=(stream_state["processed_proc"], "processed"), daemon=True).start()
 
     def start_presentation_stream() -> None:
         stop_preview_stream()
@@ -567,6 +698,8 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
 
         output_playlist = presentation_hls_dir / "live.m3u8"
         segment_pattern = presentation_hls_dir / "seg_%06d.ts"
+        use_encoder = _resolve_encoder(presentation_video_encoder)
+        pres_encoder_args = _build_video_encoder_args(use_encoder, "4000k", "5000k", "8000k")
         cmd = [
             "ffmpeg",
             "-hide_banner",
@@ -583,14 +716,11 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "0:v:0",
             "-map",
             "0:a:0?",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-tune",
-            "zerolatency",
-            "-pix_fmt",
-            "yuv420p",
+        ]
+        cmd.extend(pres_encoder_args)
+        if use_encoder != "h264_nvenc":
+            cmd.extend(["-preset", "veryfast", "-tune", "zerolatency"])
+        cmd.extend([
             "-g",
             "48",
             "-keyint_min",
@@ -616,8 +746,9 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "-hls_segment_filename",
             str(segment_pattern),
             str(output_playlist),
-        ]
-        stream_state["presentation_proc"] = subprocess.Popen(cmd)
+        ])
+        stream_state["presentation_proc"] = subprocess.Popen(cmd, stderr=subprocess.PIPE)
+        threading.Thread(target=_drain_stderr, args=(stream_state["presentation_proc"], "presentation"), daemon=True).start()
 
     def switch_to_presentation(reason: str) -> bool:
         ap = playout.find_next_after_previous()
@@ -680,7 +811,8 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         if not source_url:
             return False
 
-        if ".m3u8" in source_url:
+        current_mode = stream_state.get("mode", "")
+        if current_mode in ("iptv", "hls") or is_direct_stream_url(source_url):
             stream_state["upstream_hls_url"] = source_url
             stream_state["stream_id"] += 1
             stream_state["error"] = None
@@ -861,34 +993,29 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             force_presentation("evento sin stream")
             return False
 
-        stop_preview_stream()
         stop_processed_stream()
         stop_presentation_stream()
         segment_cache.clear()
 
+        _check_and_refresh_source_url(source)
         url = source["url"]
         source_type = source.get("type", "youtube")
-        error_msg = None
-
-        if source_type == "hls" or ".m3u8" in url:
-            hls_url = url
-        else:
-            try:
-                hls_url = StreamExtractor(url).get_hls_url()
-            except Exception as exc:
-                error_msg = f"No se pudo activar fuente: {exc}"
-                stream_state["error"] = error_msg
-                playout.add_history_entry({
-                    "timestamp": now_iso(),
-                    "source_id": source_id,
-                    "source_name": source.get("name", url),
-                    "source_type": source_type,
-                    "reason": reason,
-                    "calendar_id": calendar_id,
-                    "success": False,
-                    "error": str(exc),
-                })
-                return False
+        hls_url = _hls_url_for_source(url, source_type)
+        if not hls_url:
+            exc = stream_state.get("error") or Exception("URL no resolved")
+            error_msg = f"No se pudo activar fuente: {exc}"
+            stream_state["error"] = error_msg
+            playout.add_history_entry({
+                "timestamp": now_iso(),
+                "source_id": source_id,
+                "source_name": source.get("name", url),
+                "source_type": source_type,
+                "reason": reason,
+                "calendar_id": calendar_id,
+                "success": False,
+                "error": str(exc),
+            })
+            return False
 
         stream_state["stream_id"] += 1
         stream_state["mode"] = source_type if source_type in ("youtube", "iptv", "hls") else "youtube"
@@ -959,6 +1086,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             get_segment_dir=get_dir,
             restart=restart,
             stall_timeout_sec=float(os.environ.get("FFMPEG_STALL_TIMEOUT", str(STALL_TIMEOUT_SEC))),
+            startup_grace_sec=float(os.environ.get("FFMPEG_STARTUP_GRACE_SEC", str(STARTUP_GRACE_SEC))),
         )
         sup = Supervisor(cfg)
         sup.start()
@@ -1436,8 +1564,6 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
     @app.route("/processed/live.m3u8")
     def processed_live_playlist():
         if not processed_enabled:
-            if force_presentation("procesado desactivado"):
-                return presentation_m3u8()
             return no_store(Response("Salida procesada desactivada.\n", status=404))
 
         if stream_state.get("mode") == "presentation":
@@ -1445,8 +1571,6 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
 
         upstream_hls_url = stream_state.get("upstream_hls_url")
         if not upstream_hls_url:
-            if force_presentation("sin directo para procesado"):
-                return presentation_m3u8()
             return no_store(Response("No hay ningun directo conectado.\n", status=404))
 
         playlist_path = processed_hls_dir / "live.m3u8"
@@ -1455,60 +1579,77 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
                 start_processed_stream(upstream_hls_url)
             except Exception as exc:
                 stream_state["processed_error"] = str(exc)
-                if force_presentation("error iniciando procesado"):
-                    return presentation_m3u8()
                 return no_store(Response(f"No se pudo iniciar procesado: {exc}\n", status=502))
 
-        for _ in range(40):
+        wait_steps = max(1, int(processed_startup_wait_seconds / 0.2))
+        for _ in range(wait_steps):
             if playlist_path.exists() and playlist_path.stat().st_size > 0:
                 break
-            time.sleep(0.1)
+            time.sleep(0.2)
 
         if not playlist_path.exists():
-            if force_presentation("procesado inicializando"):
-                return presentation_m3u8()
             return no_store(Response("Procesado HLS aun iniciando.\n", status=503))
 
         raw = playlist_path.read_text(encoding="utf-8", errors="ignore")
         lines = raw.splitlines()
 
-        entries = []
-        last_dur = float(processed_segment_seconds)
+        header_lines = []
+        segment_blocks: list[list[str]] = []
+        current_block: list[str] = []
+        pending_date_time: str | None = None
+        pending_extinf: str | None = None
+
         for ln in lines:
             s = ln.strip()
-            if s.startswith("#EXTINF:"):
-                try:
-                    last_dur = float(s.split(":", 1)[1].split(",", 1)[0])
-                except Exception:
-                    last_dur = float(processed_segment_seconds)
+            if s.startswith("#EXT-X-PROGRAM-DATE-TIME"):
+                pending_date_time = ln
+            elif s.startswith("#EXTINF:"):
+                pending_extinf = ln
             elif s and not s.startswith("#"):
-                entries.append({"uri": s, "dur": last_dur})
+                block = []
+                if pending_date_time:
+                    block.append(pending_date_time)
+                if pending_extinf:
+                    block.append(pending_extinf)
+                block.append(f"/processed/live/{s}")
+                segment_blocks.append(block)
+                pending_date_time = None
+                pending_extinf = None
+            elif s.startswith("#EXTM3U") or s.startswith("#EXT-X-VERSION") or s.startswith("#EXT-X-TARGETDURATION") or s.startswith("#EXT-X-MEDIA-SEQUENCE") or s.startswith("#EXT-X-INDEPENDENT-SEGMENTS") or s.startswith("#EXT-X-DISCONTINUITY"):
+                header_lines.append(ln)
+            elif current_block or pending_extinf or pending_date_time:
+                pass
+            else:
+                header_lines.append(ln)
 
-        if not entries:
-            if force_presentation("procesado sin entradas"):
-                return presentation_m3u8()
+        if not segment_blocks:
             return no_store(Response("Procesado HLS aun iniciando.\n", status=503))
 
-        cut = len(entries)
+        total_dur = sum(
+            float(b[1].split(":", 1)[1].split(",", 1)[0]) if len(b) > 1 else processed_segment_seconds
+            for b in segment_blocks
+        )
+
+        cut = len(segment_blocks)
         delayed = 0.0
         while cut > 0 and delayed < float(processed_delay_seconds):
             cut -= 1
-            delayed += float(entries[cut]["dur"])
+            b = segment_blocks[cut]
+            for ln in b:
+                if ln.startswith("#EXTINF:"):
+                    try:
+                        delayed += float(ln.split(":", 1)[1].split(",", 1)[0])
+                    except Exception:
+                        delayed += float(processed_segment_seconds)
+                    break
 
         if cut <= 0:
-            if force_presentation("acumulando buffer diferido"):
-                return presentation_m3u8()
             return no_store(Response("Procesado acumulando buffer de diferido.\n", status=503))
 
-        kept_set = {e["uri"] for e in entries[:cut]}
-        out = []
-        for ln in lines:
-            s = ln.strip()
-            if s and not s.startswith("#"):
-                if s in kept_set:
-                    out.append(f"/processed/live/{s}")
-                continue
-            out.append(ln)
+        out = ["#EXTM3U", "#EXT-X-VERSION:6", "#EXT-X-TARGETDURATION:4",
+               "#EXT-X-MEDIA-SEQUENCE:0", "#EXT-X-INDEPENDENT-SEGMENTS"]
+        for b in segment_blocks[:cut]:
+            out.extend(b)
 
         playlist = "\n".join(out) + "\n"
         return no_store(Response(playlist, mimetype="application/vnd.apple.mpegurl"))
@@ -1536,6 +1677,31 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "python": platform.python_version(),
             "tz": os.environ.get("TZ", "UTC"),
         })
+
+    @app.route("/api/logs")
+    def api_logs():
+        preview_buf = stream_state.get("logs", {}).get("preview", [])
+        processed_buf = stream_state.get("logs", {}).get("processed", [])
+        presentation_buf = stream_state.get("logs", {}).get("presentation", [])
+        preview_alive = stream_state.get("preview_proc") is not None and stream_state.get("preview_proc").poll() is None
+        processed_alive = stream_state.get("processed_proc") is not None and stream_state.get("processed_proc").poll() is None
+        presentation_alive = stream_state.get("presentation_proc") is not None and stream_state.get("presentation_proc").poll() is None
+        return jsonify({
+            "preview": list(preview_buf),
+            "processed": list(processed_buf),
+            "presentation": list(presentation_buf),
+            "processed_error": stream_state.get("processed_error"),
+            "upstream_error": stream_state.get("error"),
+            "mode": stream_state.get("mode"),
+            "preview_alive": preview_alive,
+            "processed_alive": processed_alive,
+            "presentation_alive": presentation_alive,
+            "source_name": stream_state.get("source_url_name"),
+        })
+
+    @app.route("/api/gpu/status")
+    def api_gpu_status():
+        return jsonify(_gpu_status())
 
     @app.route("/channels.m3u")
     def channels_m3u():

@@ -31,7 +31,7 @@ from typing import Callable, Iterable
 log = logging.getLogger("ffmpeg_supervisor")
 
 STALL_TIMEOUT_SEC = 30.0
-STARTUP_GRACE_SEC = 15.0
+STARTUP_GRACE_SEC = 60.0
 STDERR_TAIL_LINES = 20
 
 
