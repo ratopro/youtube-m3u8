@@ -99,6 +99,8 @@ class Supervisor(threading.Thread):
         self._last_segment_mtime: float = 0.0
         self._started_at: float = 0.0
         self._lock = threading.Lock()
+        self._consecutive_failures: int = 0
+        self._max_backoff_sec: float = 60.0
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -142,13 +144,54 @@ class Supervisor(threading.Thread):
                 # Process exited: log, restart.
                 if proc.poll() is not None:
                     tail = "\n".join(self._stderr_buffer[-STDERR_TAIL_LINES:])
-                    log.warning(
-                        "ffmpeg[%s/%s] exited rc=%s. Tail:\n%s",
-                        self._cfg.name,
-                        proc.pid,
-                        proc.returncode,
-                        tail or "<no stderr>",
-                    )
+                    uptime = time.time() - self._started_at
+                    if uptime < 5.0:
+                        # Quick failure: apply exponential backoff to
+                        # avoid a hot relaunch loop when ffmpeg keeps
+                        # dying instantly (e.g. permission denied).
+                        self._consecutive_failures += 1
+                        backoff = min(
+                            self._max_backoff_sec,
+                            2 ** min(self._consecutive_failures, 6),
+                        )
+                        log.warning(
+                            "ffmpeg[%s/%s] exited rc=%s after %.1fs. "
+                            "Backing off %.0fs (consecutive failures=%d). Tail:\n%s",
+                            self._cfg.name,
+                            proc.pid,
+                            proc.returncode,
+                            uptime,
+                            backoff,
+                            self._consecutive_failures,
+                            tail or "<no stderr>",
+                        )
+                        if self._consecutive_failures >= 3:
+                            log.error(
+                                "ffmpeg[%s] has failed %d times in a row; "
+                                "giving up auto-restart until manually triggered",
+                                self._cfg.name,
+                                self._consecutive_failures,
+                            )
+                            self._current_proc = None
+                            self._stop_event.wait(backoff)
+                            continue
+                        self._current_proc = None
+                        try:
+                            self._cfg.restart()
+                        except Exception:  # pragma: no cover
+                            log.exception("Restart callback failed for %s", self._cfg.name)
+                        self._stop_event.wait(backoff)
+                        continue
+                    else:
+                        log.warning(
+                            "ffmpeg[%s/%s] exited rc=%s after %.0fs. Tail:\n%s",
+                            self._cfg.name,
+                            proc.pid,
+                            proc.returncode,
+                            uptime,
+                            tail or "<no stderr>",
+                        )
+                        self._consecutive_failures = 0
                     if self._cfg.on_dead:
                         try:
                             self._cfg.on_dead(tail)
@@ -180,6 +223,7 @@ class Supervisor(threading.Thread):
                         )
                         kill_process(proc)
                         self._current_proc = None
+                        self._consecutive_failures = 0
                         try:
                             self._cfg.restart()
                         except Exception:  # pragma: no cover
