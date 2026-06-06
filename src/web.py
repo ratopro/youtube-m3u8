@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import ipaddress
+import logging
 import math
 import os
 import re
@@ -16,6 +17,8 @@ from xml.sax.saxutils import escape
 
 import requests
 from flask import Flask, Response, jsonify, redirect, render_template, request, send_file, send_from_directory, url_for
+
+log = logging.getLogger("youtube_hls.web")
 
 from src.playout import PlayoutEngine
 from src.youtube_extractor import StreamExtractor
@@ -38,6 +41,13 @@ from src.iptv_importer import (
 )
 from src import epg_store
 from src.timeutils import now, now_date, now_hm, now_hms, now_iso
+from src.ffmpeg_supervisor import (
+    STALL_TIMEOUT_SEC,
+    Supervisor,
+    SupervisorConfig,
+    cleanup_orphans,
+    kill_process,
+)
 
 
 def no_store(response: Response) -> Response:
@@ -403,23 +413,11 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
     }
 
     def stop_presentation_stream() -> None:
-        proc = stream_state.get("presentation_proc")
-        if proc and proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+        kill_process(stream_state.get("presentation_proc"))
         stream_state["presentation_proc"] = None
 
     def stop_preview_stream() -> None:
-        proc = stream_state.get("preview_proc")
-        if proc and proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+        kill_process(stream_state.get("preview_proc"))
         stream_state["preview_proc"] = None
         stream_state["preview_stream_id"] = None
 
@@ -465,15 +463,10 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         ]
         stream_state["preview_proc"] = subprocess.Popen(cmd)
         stream_state["preview_stream_id"] = stream_state["stream_id"]
+        stream_state["preview_url"] = input_url
 
     def stop_processed_stream() -> None:
-        proc = stream_state.get("processed_proc")
-        if proc and proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+        kill_process(stream_state.get("processed_proc"))
         stream_state["processed_proc"] = None
         stream_state["processed_stream_id"] = None
 
@@ -558,6 +551,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         ]
         stream_state["processed_proc"] = subprocess.Popen(cmd)
         stream_state["processed_stream_id"] = stream_state["stream_id"]
+        stream_state["processed_url"] = input_url
         stream_state["processed_error"] = None
 
     def start_presentation_stream() -> None:
@@ -942,6 +936,61 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         return daily_check_iptv(playout, get_providers())
 
     start_daily_scheduler(_daily_iptv_check)
+
+    # Reap any ffmpeg process left over from a previous container
+    # instance and clear stale HLS temp dirs.
+    try:
+        cleanup_orphans([preview_hls_dir, processed_hls_dir, presentation_hls_dir])
+    except Exception:
+        log.exception("ffmpeg orphan cleanup failed")
+
+    # Spin up watchdog threads that restart each ffmpeg pipeline if it
+    # stops emitting HLS segments.  Adapted from jvdillon/netv's session
+    # supervisor: same heartbeat idea, but a simpler in-process version
+    # tailored to our three singletons.
+    _supervisors: list[Supervisor] = []
+
+    def _start_supervisor(name: str, get_proc, get_dir, restart) -> None:
+        cfg = SupervisorConfig(
+            name=name,
+            get_proc=get_proc,
+            get_segment_dir=get_dir,
+            restart=restart,
+            stall_timeout_sec=float(os.environ.get("FFMPEG_STALL_TIMEOUT", str(STALL_TIMEOUT_SEC))),
+        )
+        sup = Supervisor(cfg)
+        sup.start()
+        _supervisors.append(sup)
+
+    _start_supervisor(
+        "presentation",
+        lambda: stream_state.get("presentation_proc"),
+        lambda: presentation_hls_dir,
+        lambda: start_presentation_stream(),
+    )
+
+    def _restart_preview():
+        url = stream_state.get("preview_url")
+        if url:
+            start_preview_stream(url)
+
+    def _restart_processed():
+        url = stream_state.get("processed_url")
+        if url and processed_enabled:
+            start_processed_stream(url)
+
+    _start_supervisor(
+        "preview",
+        lambda: stream_state.get("preview_proc"),
+        lambda: preview_hls_dir,
+        _restart_preview,
+    )
+    _start_supervisor(
+        "processed",
+        lambda: stream_state.get("processed_proc"),
+        lambda: processed_hls_dir,
+        _restart_processed,
+    )
 
     @app.route("/")
     def index():
