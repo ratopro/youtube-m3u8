@@ -221,7 +221,10 @@
 <main>
     <div class="nav">
         <h1 style="margin:0;">Sources</h1>
-        <h2 style="margin:0; flex:1;">{{ app_version }}</h2>
+        <h2 style="margin:0; flex:1; color:#9ca3af; font-size:14px;">
+            v{{ app_version }}
+            {% if build_commit %}<span style="color:#6b7280; font-size:12px;">({{ build_commit }}{% if build_date %} · {{ build_date }}{% endif %})</span>{% endif %}
+        </h2>
         <a href="/" class="btn btn-primary">Volver a parrilla</a>
     </div>
 

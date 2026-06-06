@@ -374,6 +374,8 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
     presentation_hls_list_size = int(os.environ.get("PRESENTATION_HLS_LIST_SIZE", "24"))
     presentation_hls_delete_threshold = int(os.environ.get("PRESENTATION_HLS_DELETE_THRESHOLD", "12"))
     app_version = os.environ.get("APP_VERSION", "dev")
+    build_commit = os.environ.get("APP_COMMIT", "")
+    build_date = os.environ.get("APP_BUILD_DATE", "")
     auto_presentation_on_end = os.environ.get("AUTO_PRESENTATION_ON_END", "1") == "1"
     processed_enabled = os.environ.get("PROCESSED_ENABLED", "1") == "1"
     processed_delay_seconds = int(os.environ.get("PROCESSED_DELAY_SECONDS", "60"))
@@ -1051,6 +1053,8 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         response = no_store(Response(render_template(
             "player.html",
             app_version=app_version,
+            build_commit=build_commit,
+            build_date=build_date,
             playlist_url="/live.m3u8" if current_mode else None,
             playback_url=playback_url,
             is_hls=is_hls_flag,
@@ -1181,6 +1185,8 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         response = no_store(Response(render_template(
             "sources.html",
             app_version=app_version,
+            build_commit=build_commit,
+            build_date=build_date,
             sources=sources_for_page,
             iptv_providers=iptv_providers,
         )))
@@ -1518,6 +1524,18 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
     @app.route("/health")
     def health():
         return no_store(Response("ok\n", mimetype="text/plain"))
+
+    @app.route("/api/version")
+    def api_version():
+        import platform
+        return jsonify({
+            "app": "youtube-m3u8",
+            "version": app_version,
+            "commit": build_commit or None,
+            "build_date": build_date or None,
+            "python": platform.python_version(),
+            "tz": os.environ.get("TZ", "UTC"),
+        })
 
     @app.route("/channels.m3u")
     def channels_m3u():

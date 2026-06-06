@@ -352,7 +352,10 @@
     <div class="header">
         <div>
             <h1>Parrilla TV</h1>
-            <h2>Reemisor HLS Local · {{ app_version }}</h2>
+            <h2>
+                Reemisor HLS Local · v{{ app_version }}
+                {% if build_commit %}<span style="color:#6b7280; font-size:12px;">({{ build_commit }}{% if build_date %} · {{ build_date }}{% endif %})</span>{% endif %}
+            </h2>
         </div>
         {% if connected %}
             <span class="status-tag playing">
