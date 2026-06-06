@@ -1,6 +1,7 @@
 import difflib
 import io
 import re
+import urllib.parse
 import xml.etree.ElementTree as ET
 import threading
 import time
@@ -81,7 +82,10 @@ def get_provider(provider_id: str) -> dict | None:
 
 
 def xtream_live_url(provider: dict, stream_id: int) -> str:
-    return f"{provider['dns']}/live/{provider['username']}/{provider['password']}/{stream_id}.ts"
+    base = (provider.get("dns") or "").rstrip("/")
+    user = urllib.parse.quote(str(provider.get("username", "")), safe="")
+    pwd = urllib.parse.quote(str(provider.get("password", "")), safe="")
+    return f"{base}/live/{user}/{pwd}/{stream_id}.ts"
 
 
 def fetch_categories(provider: dict) -> list[dict]:
@@ -311,8 +315,50 @@ GROUP_MAP = {
 }
 
 
+def _clean_group_name(raw: str) -> str:
+    if not raw:
+        return "Otros"
+    cleaned = re.sub(r"^[A-Z]{2}\s*\|\s*", "", raw.strip(), flags=re.IGNORECASE)
+    return cleaned or raw.strip()
+
+
+def fetch_provider_categories(provider: dict) -> dict[str, str]:
+    """Return a real category_id -> cleaned name map for the provider.
+
+    Falls back to the provider's locally-configured categories when the
+    Xtream API is unreachable.
+    """
+    try:
+        cats = fetch_categories(provider)
+    except Exception:
+        return {str(cid): name for cid, name in (provider.get("categories") or {}).items()}
+
+    if not isinstance(cats, list):
+        return {str(cid): name for cid, name in (provider.get("categories") or {}).items()}
+
+    result: dict[str, str] = {}
+    for c in cats:
+        cid = str(c.get("category_id", "")).strip()
+        name = (c.get("category_name") or "").strip()
+        if cid:
+            result[cid] = _clean_group_name(name)
+    if not result:
+        return {str(cid): name for cid, name in (provider.get("categories") or {}).items()}
+    return result
+
+
+def fetch_provider_streams(provider: dict) -> list[dict]:
+    """Return all live streams for the provider as raw Xtream dicts."""
+    params = f"username={provider['username']}&password={provider['password']}&action=get_live_streams"
+    url = f"{provider['dns'].rstrip('/')}/player_api.php?{params}"
+    req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urlopen(req, timeout=120) as r:
+        data = json.loads(r.read().decode())
+    return data if isinstance(data, list) else []
+
+
 def channels_for_category(provider: dict, category_id: str) -> list[dict]:
-    group = GROUP_MAP.get(category_id, "Otros")
+    group = GROUP_MAP.get(category_id) or _clean_group_name(category_id)
     channels = fetch_channels(provider, category_id)
     result = []
     for ch in channels:
@@ -325,6 +371,7 @@ def channels_for_category(provider: dict, category_id: str) -> list[dict]:
             "type": "iptv",
             "url": xtream_live_url(provider, stream_id),
             "auto_enabled": False,
+            "emit_enabled": False,
             "duration_label": "Directo",
             "is_live": True,
             "iptv_provider": provider["id"],
@@ -333,6 +380,79 @@ def channels_for_category(provider: dict, category_id: str) -> list[dict]:
             "iptv_group": group,
         })
     return result
+
+
+def import_provider_channels(
+    provider: dict,
+    playout_engine,
+) -> dict:
+    """Import every live stream from an Xtream provider like netv does.
+
+    Matches existing sources by (provider_id, stream_id) so re-imports don't
+    create duplicates; refreshes URL/name/group and marks new channels as
+    hidden (emit_enabled=False, auto_enabled=False) so they show up in
+    /sources but do not pollute the main player until the user opts-in.
+    """
+    category_map = fetch_provider_categories(provider)
+    streams = fetch_provider_streams(provider)
+    imported = 0
+    updated = 0
+    skipped = 0
+    errors: list[str] = []
+
+    for ch in streams:
+        stream_id = ch.get("stream_id")
+        name = (ch.get("name") or "").strip()
+        if not stream_id or not name:
+            skipped += 1
+            continue
+        category_ids = ch.get("category_ids") or []
+        primary_cat_id = str(category_ids[0]) if category_ids else ""
+        group_name = category_map.get(primary_cat_id)
+        if not group_name:
+            if primary_cat_id in GROUP_MAP:
+                group_name = GROUP_MAP[primary_cat_id]
+            else:
+                group_name = "Otros"
+        url = xtream_live_url(provider, stream_id)
+
+        existing = playout_engine.find_source_by_provider_stream(provider["id"], stream_id)
+        if existing:
+            updates = {
+                "name": name,
+                "url": url,
+                "iptv_category_id": primary_cat_id,
+                "iptv_group": group_name,
+            }
+            playout_engine.update_source(existing["id"], updates)
+            updated += 1
+            continue
+
+        new_source = {
+            "name": name,
+            "type": "iptv",
+            "url": url,
+            "auto_enabled": False,
+            "emit_enabled": False,
+            "duration_label": "Directo",
+            "is_live": True,
+            "iptv_provider": provider["id"],
+            "iptv_stream_id": stream_id,
+            "iptv_category_id": primary_cat_id,
+            "iptv_group": group_name,
+        }
+        playout_engine.add_source(new_source)
+        imported += 1
+
+    return {
+        "provider_id": provider["id"],
+        "total": len(streams),
+        "imported": imported,
+        "updated": updated,
+        "skipped": skipped,
+        "errors": errors,
+        "category_count": len(category_map),
+    }
 
 
 def check_url(url: str, timeout: int = 8) -> str:

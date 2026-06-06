@@ -136,6 +136,26 @@ class PlayoutEngine:
                     return s
         return None
 
+    def find_source_by_provider_stream(self, provider_id: str, stream_id: int | str) -> dict | None:
+        with self.lock:
+            for s in self._state["sources"]:
+                if (
+                    s.get("type") == "iptv"
+                    and s.get("iptv_provider") == provider_id
+                    and str(s.get("iptv_stream_id", "")) == str(stream_id)
+                ):
+                    return s
+        return None
+
+    def update_source(self, source_id: str, updates: dict) -> bool:
+        with self.lock:
+            for s in self._state["sources"]:
+                if s["id"] == source_id:
+                    s.update({k: v for k, v in updates.items() if v is not None})
+                    self._save()
+                    return True
+            return False
+
     def _check(self):
         source_to_activate = None
         reason = None
@@ -627,17 +647,6 @@ class PlayoutEngine:
     def get_history(self, limit: int = 100) -> list:
         with self.lock:
             return list(self._state.get("history", []))[-limit:]
-
-    def update_source(self, source_id: str, updates: dict) -> bool:
-        with self.lock:
-            for s in self._state["sources"]:
-                if s["id"] == source_id:
-                    for key, value in updates.items():
-                        if key != "id":
-                            s[key] = value
-                    self._save()
-                    return True
-            return False
 
     def set_source_validation(self, source_id: str, status: str, error: str | None = None):
         with self.lock:

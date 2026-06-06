@@ -2607,46 +2607,49 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
 
     @app.route("/api/iptv/import", methods=["POST"])
     def api_iptv_import():
+        from src.iptv_importer import import_provider_channels
         provider_id = request.form.get("provider_id", "").strip() or None
         results = []
         total_imported = 0
+        total_updated = 0
         total_errors = 0
         for provider in get_providers():
             if provider_id and provider["id"] != provider_id:
                 continue
-            cats = provider.get("categories", {})
-            for cid, group_label in sorted(cats.items(), key=lambda x: int(x[0])):
-                try:
-                    channels = channels_for_category(provider, cid)
-                    imported = 0
-                    skipped = 0
-                    for ch in channels:
-                        existing = playout.find_source_by_name(ch["name"])
-                        if existing:
-                            skipped += 1
-                            continue
-                        playout.add_source(ch)
-                        imported += 1
-                    total_imported += imported
-                    results.append({
-                        "category_id": cid,
-                        "category_label": group_label,
-                        "total": len(channels),
-                        "imported": imported,
-                        "skipped": skipped,
-                        "error": None,
-                    })
-                except Exception as exc:
-                    total_errors += 1
-                    results.append({
-                        "category_id": cid,
-                        "category_label": group_label,
-                        "total": 0,
-                        "imported": 0,
-                        "skipped": 0,
-                        "error": str(exc),
-                    })
-        return jsonify({"ok": True, "results": results, "total_imported": total_imported, "total_errors": total_errors})
+            try:
+                summary = import_provider_channels(provider, playout)
+                total_imported += summary["imported"]
+                total_updated += summary["updated"]
+                results.append({
+                    "provider_id": provider["id"],
+                    "category_id": "*",
+                    "category_label": "Todos los grupos",
+                    "total": summary["total"],
+                    "imported": summary["imported"],
+                    "updated": summary["updated"],
+                    "skipped": summary["skipped"],
+                    "category_count": summary["category_count"],
+                    "error": None,
+                })
+            except Exception as exc:
+                total_errors += 1
+                results.append({
+                    "provider_id": provider["id"],
+                    "category_id": "*",
+                    "category_label": "Todos los grupos",
+                    "total": 0,
+                    "imported": 0,
+                    "updated": 0,
+                    "skipped": 0,
+                    "error": str(exc),
+                })
+        return jsonify({
+            "ok": True,
+            "results": results,
+            "total_imported": total_imported,
+            "total_updated": total_updated,
+            "total_errors": total_errors,
+        })
 
     @app.route("/api/iptv/providers/add", methods=["POST"])
     def api_iptv_add_provider():

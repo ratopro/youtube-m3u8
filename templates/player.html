@@ -756,8 +756,17 @@
 
     function updatePreviewToggleUi() {
         var btn = document.getElementById('preview-toggle-btn');
-        if (!btn) return;
-        btn.textContent = previewEnabled ? 'Preview ON' : 'Preview OFF';
+        if (btn) {
+            btn.textContent = previewEnabled ? 'Preview ON' : 'Preview OFF';
+        }
+        var wrapper = document.querySelector('.preview-player');
+        if (wrapper) {
+            if (previewEnabled && '{{ "true" if connected else "false" }}' === 'true') {
+                wrapper.style.display = '';
+            } else {
+                wrapper.style.display = 'none';
+            }
+        }
     }
 
     function teardownPreviewPlayers() {
@@ -771,25 +780,35 @@
         }
         if (previewVideo) {
             previewVideo.pause();
-            previewVideo.removeAttribute('src');
-            previewVideo.load();
+            try {
+                previewVideo.removeAttribute('src');
+            } catch (e) {}
+            previewVideo.src = '';
+            // Calling load() resets readyState and clears the
+            // displayed frame so the screen is fully black instead of
+            // freezing the last decoded image.
+            try { previewVideo.load(); } catch (e) {}
+        }
+        var wrapper = document.querySelector('.preview-player');
+        if (wrapper) {
+            wrapper.style.display = 'none';
         }
     }
 
     function togglePreview() {
         previewEnabled = !previewEnabled;
         localStorage.setItem('previewEnabled', previewEnabled ? '1' : '0');
-        updatePreviewToggleUi();
         if (!previewEnabled) {
             teardownPreviewPlayers();
+            updatePreviewToggleUi();
             return;
         }
+        updatePreviewToggleUi();
         setupPlayer();
     }
 
     function setupPlayer() {
         if (!previewVideo) return;
-        updatePreviewToggleUi();
         if (!previewEnabled) {
             teardownPreviewPlayers();
             return;
@@ -799,9 +818,17 @@
         var isDirectTs = {{ 'true' if is_direct_ts else 'false' }};
         var isDirectMp4 = {{ 'true' if is_direct_mp4 else 'false' }};
 
-        if (!playbackUrl || playbackUrl === 'None') return;
+        if (!playbackUrl || playbackUrl === 'None') {
+            var wrapper = document.querySelector('.preview-player');
+            if (wrapper) wrapper.style.display = 'none';
+            return;
+        }
 
         teardownPreviewPlayers();
+        var wrapper = document.querySelector('.preview-player');
+        if (wrapper) wrapper.style.display = '';
+
+        updatePreviewToggleUi();
 
         if (isDirectMp4) {
             previewVideo.src = playbackUrl;
@@ -829,6 +856,9 @@
             previewVideo.play().catch(function() {});
         }
     }
+    // Always reflect the persisted preview state on initial load
+    // (e.g. user disabled it last session).
+    updatePreviewToggleUi();
     setupPlayer();
 
     function updateDigitalClock() {
