@@ -342,6 +342,14 @@
                     <option value="marked">Emitir: Marcados</option>
                     <option value="unmarked">Emitir: No marcados</option>
                 </select>
+                <select id="source-quality-filter" onchange="applyFilters()" style="background:#030712; border:1px solid #4b5563; border-radius:6px; color:#fff; font-size:13px; padding:6px 10px;">
+                    <option value="">Calidad: Todas</option>
+                    <option value="sd">SD</option>
+                    <option value="hd">HD</option>
+                    <option value="fhd">FHD</option>
+                    <option value="uhd">UHD / 4K</option>
+                    <option value="hevc">HEVC / H265</option>
+                </select>
                 <button class="btn btn-sm" onclick="setEmitForAll(true)">Marcar todos</button>
                 <button class="btn btn-sm" onclick="setEmitForAll(false)">Desmarcar todos</button>
                 <button class="btn btn-sm" onclick="refreshPage()">Recargar</button>
@@ -462,11 +470,13 @@
 
     function loadSourcesAndRender() {
         var selectedGroup = document.getElementById('source-group-filter').value;
+        var selectedQuality = document.getElementById('source-quality-filter').value;
         fetch('/api/sources')
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 SOURCES = data || [];
                 buildGroupFilter(selectedGroup);
+                buildQualityFilter();
                 renderPage();
             })
             .catch(function(err) {
@@ -538,10 +548,51 @@
         }
     }
 
+    function getSourceQuality(s) {
+        var name = (s.name || '').toUpperCase();
+        if (/HEVC|H265|H\.265|X265/.test(name)) return 'hevc';
+        if (/UHD|4K|2160/.test(name)) return 'uhd';
+        if (/FHD|FULL\s*HD|1080/.test(name)) return 'fhd';
+        if (/HD|720/.test(name)) return 'hd';
+        if (/SD|480|576/.test(name)) return 'sd';
+        return 'other';
+    }
+
+    function buildQualityFilter() {
+        var sel = document.getElementById('source-quality-filter');
+        if (!sel) return;
+        var selected = sel.value;
+        var counts = {};
+        if (SOURCES && SOURCES.length) {
+            SOURCES.forEach(function(s) {
+                if (s.type !== 'iptv') return;
+                var q = getSourceQuality(s);
+                counts[q] = (counts[q] || 0) + 1;
+            });
+        }
+        sel.innerHTML = '<option value="">Calidad: Todas</option>';
+        [
+            ['sd', 'SD'],
+            ['hd', 'HD'],
+            ['fhd', 'FHD'],
+            ['uhd', 'UHD / 4K'],
+            ['hevc', 'HEVC / H265'],
+        ].forEach(function(pair) {
+            var opt = document.createElement('option');
+            opt.value = pair[0];
+            opt.textContent = pair[1] + (counts[pair[0]] ? ' (' + counts[pair[0]] + ')' : '');
+            sel.appendChild(opt);
+        });
+        if (selected && sel.querySelector('option[value="' + selected + '"]')) {
+            sel.value = selected;
+        }
+    }
+
     function getFiltered() {
         var groupFilter = document.getElementById('source-group-filter').value;
         var typeFilter = document.getElementById('source-type-filter').value;
         var emitFilter = document.getElementById('source-emit-filter').value;
+        var qualityFilter = document.getElementById('source-quality-filter').value;
         var nameFilter = document.getElementById('source-name-filter').value.toLowerCase().trim();
         var filtered = SOURCES.filter(function(s) {
             var emitEnabled = s.emit_enabled !== false;
@@ -549,6 +600,7 @@
             if (typeFilter && s.type !== typeFilter) return false;
             if (emitFilter === 'marked' && !emitEnabled) return false;
             if (emitFilter === 'unmarked' && emitEnabled) return false;
+            if (qualityFilter && s.type === 'iptv' && getSourceQuality(s) !== qualityFilter) return false;
             if (nameFilter && s.name.toLowerCase().indexOf(nameFilter) === -1) return false;
             return true;
         });
@@ -581,7 +633,7 @@
             var autoLabel = s.auto_enabled ? 'ON' : 'OFF';
             var emitEnabled = s.emit_enabled !== false;
             var group = s.iptv_group || s.type || '-';
-            html += '<tr data-source-type="' + escapeHtml(s.type || '') + '" data-source-id="' + escapeHtml(s.id) + '" data-source-name="' + escapeHtml((s.name || '').toLowerCase()) + '" data-source-group="' + escapeHtml((s.iptv_group || s.type || 'otro').toLowerCase()) + '" data-source-emit="' + (emitEnabled ? '1' : '0') + '">'
+            html += '<tr data-source-type="' + escapeHtml(s.type || '') + '" data-source-id="' + escapeHtml(s.id) + '" data-source-name="' + escapeHtml((s.name || '').toLowerCase()) + '" data-source-group="' + escapeHtml((s.iptv_group || s.type || 'otro').toLowerCase()) + '" data-source-emit="' + (emitEnabled ? '1' : '0') + '" data-source-quality="' + (s.type === 'iptv' ? getSourceQuality(s) : '') + '">'
                 + '<td><span class="source-type ' + typeClass + '">' + escapeHtml(s.type) + '</span></td>'
                 + '<td data-label="Auto" style="text-align:center;"><span class="tag ' + autoClass + '" onclick="toggleAuto(\'' + s.id + '\')" style="cursor:pointer;">' + autoLabel + '</span></td>'
                 + '<td data-label="Visible" style="text-align:center;"><input type="checkbox" class="emit-check" ' + (emitEnabled ? 'checked' : '') + ' onchange="toggleEmit(\'' + s.id + '\', this.checked)"></td>'
@@ -1032,6 +1084,7 @@
     initCurrentPage();
     refreshProvidersUi();
     buildGroupFilter();
+    buildQualityFilter();
     renderPage();
 </script>
 
