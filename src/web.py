@@ -1575,7 +1575,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             return no_store(Response("No hay ningun directo conectado.\n", status=404))
 
         playlist_path = processed_hls_dir / "live.m3u8"
-        if stream_state.get("processed_stream_id") != stream_state.get("stream_id") or stream_state.get("processed_proc") is None:
+        if stream_state.get("processed_proc") is None or stream_state.get("processed_proc").poll() is not None:
             try:
                 start_processed_stream(upstream_hls_url)
             except Exception as exc:
