@@ -701,21 +701,25 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         if program_fallback_video.exists():
             return True
         try:
+            import subprocess as _sub
             use_encoder = _resolve_encoder(processed_video_encoder)
             if use_encoder == "h264_nvenc":
                 enc = ["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "cbr", "-b:v", "2000k", "-maxrate", "2500k", "-bufsize", "5000k", "-profile:v", "main", "-pix_fmt", "yuv420p"]
             else:
                 enc = ["-c:v", "libx264", "-preset", "ultrafast", "-profile:v", "main", "-pix_fmt", "yuv420p", "-b:v", "2000k", "-maxrate", "2500k", "-bufsize", "5000k"]
+            font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
             cmd = [
                 "ffmpeg", "-y",
                 "-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=25:duration=30",
-                "-vf", "drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='%{localtime\:%H\\\:%M\\\:%S}':fontcolor=white:fontsize=48:x=w-tw-60:y=h-th-60:bordercolor=black:borderw=2",
+                "-vf", "drawtext=fontfile=" + font_path + ":text='NO SIGNAL':fontcolor=white:fontsize=64:x=(w-text_w)/2:y=(h-text_h)/2:bordercolor=black:borderw=3",
                 "-c:a", "aac", "-b:a", "128k", "-ar", "48000",
             ] + enc + ["-t", "30", str(program_fallback_video)
             ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            result = _sub.run(cmd, capture_output=True, text=True, timeout=120)
             if result.returncode == 0 and program_fallback_video.exists():
                 return True
+            else:
+                print("ffmpeg stderr:", result.stderr[:500])
         except Exception as exc:
             print(f"Fallback video generation failed: {exc}")
         return False
@@ -1193,15 +1197,23 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
     })
     playout.start()
 
-    # Start program stream at startup if we have a saved upstream URL
+    # Generate fallback video at startup so it's ready
+    try:
+        generate_fallback_video()
+    except Exception:
+        pass
+
+    # Start program stream at startup - fallback if no saved upstream
     _initial_upstream = stream_state.get("upstream_hls_url")
     if _initial_upstream:
         try:
             start_program_stream(_initial_upstream)
         except Exception:
-            pass
+            try:
+                start_program_fallback()
+            except Exception:
+                pass
     else:
-        # No saved source - start fallback so Emby always has a stream
         try:
             start_program_fallback()
         except Exception:
