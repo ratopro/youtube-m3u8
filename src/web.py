@@ -109,7 +109,7 @@ def _resolve_encoder(requested_encoder: str) -> str:
     return "libx264"
 
 
-def _build_video_encoder_args(encoder: str, bitrate: str, maxrate: str, bufsize: str) -> list[str]:
+def _build_video_encoder_args(encoder: str, bitrate: str, maxrate: str, bufsize: str, preset: str) -> list[str]:
     if encoder == "h264_nvenc":
         return [
             "-c:v", "h264_nvenc",
@@ -123,7 +123,7 @@ def _build_video_encoder_args(encoder: str, bitrate: str, maxrate: str, bufsize:
         ]
     return [
         "-c:v", "libx264",
-        "-preset", processed_preset,
+        "-preset", preset,
         "-profile:v", "high",
         "-level", "4.1",
         "-pix_fmt", "yuv420p",
@@ -622,6 +622,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         use_encoder = _resolve_encoder(processed_video_encoder)
         encoder_args = _build_video_encoder_args(
             use_encoder, processed_video_bitrate, processed_video_maxrate, processed_video_bufsize,
+            processed_preset,
         )
         cmd = [
             "ffmpeg",
@@ -699,7 +700,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         output_playlist = presentation_hls_dir / "live.m3u8"
         segment_pattern = presentation_hls_dir / "seg_%06d.ts"
         use_encoder = _resolve_encoder(presentation_video_encoder)
-        pres_encoder_args = _build_video_encoder_args(use_encoder, "4000k", "5000k", "8000k")
+        pres_encoder_args = _build_video_encoder_args(use_encoder, "4000k", "5000k", "8000k", "fast")
         cmd = [
             "ffmpeg",
             "-hide_banner",
