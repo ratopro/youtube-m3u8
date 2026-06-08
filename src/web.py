@@ -739,6 +739,10 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         )
         output_playlist = program_hls_dir / "live.m3u8"
         segment_pattern = program_hls_dir / "seg_%06d.ts"
+        clock_filter = ("drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:"
+                       "text='%{localtime}':"
+                       "fontcolor=white:fontsize=64:x=w-tw-80:y=h-th-80:"
+                       "box=1:boxcolor=black@0.5:boxborderw=12:bordercolor=black:borderw=2")
         cmd = [
             "ffmpeg",
             "-hide_banner",
@@ -750,6 +754,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "-stream_loop", "-1",
             "-i", input_url,
             "-map", "0:v:0", "-map", "0:a:0?",
+            "-vf", clock_filter,
         ] + encoder_args + [
             "-g", "50", "-keyint_min", "50", "-sc_threshold", "0",
             "-c:a", "aac", "-b:a", processed_audio_bitrate, "-ar", "48000", "-ac", "2",
@@ -794,7 +799,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         output_playlist = program_hls_dir / "live.m3u8"
         segment_pattern = program_hls_dir / "seg_%06d.ts"
         clock_filter = ("drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:"
-                       "text='%{localtime\\:%H\\\\:%M\\\\:%S}':"
+                       "text='%{localtime}':"
                        "fontcolor=white:fontsize=64:x=w-tw-80:y=h-th-80:"
                        "box=1:boxcolor=black@0.5:boxborderw=12:bordercolor=black:borderw=2")
         cmd = [
