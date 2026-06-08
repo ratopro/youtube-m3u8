@@ -22,6 +22,8 @@ services:
       VIDEO_ACCEL: "auto"
       PROCESSED_VIDEO_ENCODER: "libx264"
       PRESENTATION_VIDEO_ENCODER: "libx264"
+      PROGRAM_HLS_DIR: "/app/data/program_hls"
+      PROGRAM_FALLBACK_VIDEO: "/app/data/fallback.mp4"
     ports:
       - "5058:5000"
     volumes:
