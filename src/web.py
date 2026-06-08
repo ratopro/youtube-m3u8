@@ -793,6 +793,10 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         )
         output_playlist = program_hls_dir / "live.m3u8"
         segment_pattern = program_hls_dir / "seg_%06d.ts"
+        clock_filter = ("drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:"
+                       "text='%{localtime\\:%H\\\\:%M\\\\:%S}':"
+                       "fontcolor=white:fontsize=64:x=w-tw-80:y=h-th-80:"
+                       "box=1:boxcolor=black@0.5:boxborderw=12:bordercolor=black:borderw=2")
         cmd = [
             "ffmpeg",
             "-hide_banner", "-loglevel", "error",
@@ -800,6 +804,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "-stream_loop", "-1",
             "-i", str(program_fallback_video),
             "-map", "0:v:0", "-map", "0:a:0?",
+            "-vf", clock_filter,
         ] + encoder_args + [
             "-g", "50", "-keyint_min", "50", "-sc_threshold", "0",
             "-c:a", "aac", "-b:a", processed_audio_bitrate, "-ar", "48000", "-ac", "2",
@@ -1729,13 +1734,80 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
     def processed_live_playlist():
         if not processed_enabled:
             return no_store(Response("Salida procesada desactivada.\n", status=404))
+        # Always serve the program stream
+        upstream_hls_url = stream_state.get("upstream_hls_url")
+        program_proc = stream_state.get("program_proc")
+        program_dead = program_proc is None or program_proc.poll() is not None
+        if program_dead:
+            if upstream_hls_url:
+                try:
+                    start_program_stream(upstream_hls_url)
+                except Exception as exc:
+                    stream_state["program_error"] = str(exc)
+            elif program_fallback_video.exists():
+                try:
+                    start_program_fallback()
+                except Exception as exc:
+                    stream_state["program_error"] = str(exc)
+        return _wait_for_program_playlist()
 
-        if stream_state.get("mode") == "presentation":
-            return presentation_m3u8()
+    def _wait_for_program_playlist():
+        playlist_path = program_hls_dir / "live.m3u8"
+        wait_steps = max(1, int(processed_startup_wait_seconds / 0.2))
+        for _ in range(wait_steps):
+            if playlist_path.exists() and playlist_path.stat().st_size > 0:
+                break
+            time.sleep(0.2)
+        if not playlist_path.exists():
+            return no_store(Response("Programa aun iniciando.\n", status=503))
+        raw = playlist_path.read_text(encoding="utf-8", errors="ignore")
+        lines = raw.splitlines()
+        header_lines = []
+        segment_blocks = []
+        pending_date_time = None
+        pending_extinf = None
+        for ln in lines:
+            s = ln.strip()
+            if s.startswith("#EXT-X-PROGRAM-DATE-TIME"):
+                pending_date_time = ln
+            elif s.startswith("#EXTINF:"):
+                pending_extinf = ln
+            elif s and not s.startswith("#"):
+                block = []
+                if pending_date_time:
+                    block.append(pending_date_time)
+                if pending_extinf:
+                    block.append(pending_extinf)
+                block.append(f"/program/live/{s}")
+                segment_blocks.append(block)
+                pending_date_time = None
+                pending_extinf = None
+            elif s.startswith("#EXTM3U") or s.startswith("#EXT-X-VERSION") or s.startswith("#EXT-X-TARGETDURATION") or s.startswith("#EXT-X-MEDIA-SEQUENCE") or s.startswith("#EXT-X-INDEPENDENT-SEGMENTS") or s.startswith("#EXT-X-DISCONTINUITY"):
+                header_lines.append(ln)
+        if not segment_blocks:
+            return no_store(Response("Programa aun iniciando.\n", status=503))
+        out = list(header_lines)
+        for b in segment_blocks:
+            out.extend(b)
+        playlist = "\n".join(out) + "\n"
+        return no_store(Response(playlist, mimetype="application/vnd.apple.mpegurl"))
 
+    def processed_live_playlist():
+        if not processed_enabled:
+            return no_store(Response("Salida procesada desactivada.\n", status=404))
+
+        # Always serve the program stream (never short-circuit to presentation video)
+        # The program stream is the continuous output that Emby consumes
         upstream_hls_url = stream_state.get("upstream_hls_url")
         if not upstream_hls_url:
-            return no_store(Response("No hay ningun directo conectado.\n", status=404))
+            # No upstream URL: ensure fallback is running
+            if stream_state.get("program_proc") is None or stream_state.get("program_proc").poll() is not None:
+                if program_fallback_video.exists():
+                    try:
+                        start_program_fallback()
+                    except Exception:
+                        pass
+            return _wait_for_program_playlist()
 
         playlist_path = program_hls_dir / "live.m3u8"
         if stream_state.get("program_proc") is None or stream_state.get("program_proc").poll() is not None:
