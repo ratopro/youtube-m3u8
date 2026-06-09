@@ -460,50 +460,29 @@
                     <button class="btn btn-sm btn-primary" onclick="emitNow()">Emitir ahora</button>
                     <button class="btn btn-sm" onclick="nextAuto()" {% if not auto_enabled %}disabled{% endif %}>Siguiente Auto</button>
                     <button class="btn btn-sm" onclick="stopEmission()" {% if not connected %}disabled{% endif %}>Detener</button>
-                    {% if connected %}
                     <button class="btn btn-sm" id="preview-toggle-btn" onclick="togglePreview()">Preview ON</button>
-                    {% endif %}
                 </div>
                 <div class="digital-clock" id="digital-clock">--:--:--</div>
             </div>
             <div class="preview-player">
-                {% if connected %}
-                    <div class="signal-monitors">
-                        <div class="signal-panel" id="signal-input-panel">
-                            <div class="signal-label">
-                                <span class="signal-dot" id="input-dot"></span>
-                                ENTRADA REAL
-                            </div>
-                            <video id="input-preview-video" muted autoplay playsinline controls {% if mode == 'presentation' %}loop{% endif %}></video>
+                <div class="signal-monitors">
+                    <div class="signal-panel" id="signal-input-panel" style="display:none;">
+                        <div class="signal-label">
+                            <span class="signal-dot" id="input-dot"></span>
+                            ENTRADA REAL
                         </div>
-                        <div class="signal-panel" id="signal-output-panel">
-                            <div class="signal-label">
-                                <span class="signal-dot" id="output-dot"></span>
-                                SALIDA PROCESADA
-                            </div>
-                            <video id="processed-preview-video" muted autoplay playsinline controls {% if mode == 'presentation' %}loop{% endif %}></video>
-                        </div>
+                        <div class="preview-placeholder" id="input-placeholder">Sin emision activa</div>
+                        <video id="input-preview-video" muted autoplay playsinline controls style="display:none;"></video>
                     </div>
-                    <span class="preview-badge">EN DIRECTO</span>
-                {% else %}
-                    <div class="signal-monitors">
-                        <div class="signal-panel" id="signal-input-panel">
-                            <div class="signal-label">
-                                <span class="signal-dot stopped" id="input-dot"></span>
-                                ENTRADA REAL
-                            </div>
-                            <div class="preview-placeholder" id="input-placeholder">Sin emision activa</div>
-                            <video id="input-preview-video" muted autoplay playsinline controls style="display:none;"></video>
+                    <div class="signal-panel" id="signal-output-panel">
+                        <div class="signal-label">
+                            <span class="signal-dot" id="output-dot"></span>
+                            SALIDA PROCESADA
                         </div>
-                        <div class="signal-panel" id="signal-output-panel">
-                            <div class="signal-label">
-                                <span class="signal-dot" id="output-dot"></span>
-                                SALIDA PROCESADA
-                            </div>
-                            <video id="processed-preview-video" muted autoplay playsinline controls></video>
-                        </div>
+                        <video id="processed-preview-video" muted autoplay playsinline controls></video>
                     </div>
-                {% endif %}
+                </div>
+                <span class="preview-badge" id="live-badge" style="display:none;">EN DIRECTO</span>
             </div>
             <div class="logs-panel" id="logs-panel">
                 <div class="logs-header">
@@ -841,6 +820,7 @@
     var inputTsPlayer = null;
     var processedHlsPlayer = null;
     var processedTsPlayer = null;
+    var outputPlayerReady = false;
     var previewEnabled = localStorage.getItem('previewEnabled') !== '0';
     var logsCollapsed = true;
     var logsInterval = null;
@@ -877,19 +857,65 @@
             inputPreviewVideo.src = '';
             try { inputPreviewVideo.load(); } catch (e) {}
         }
+        var inputWrapper = document.getElementById('signal-input-panel');
+        var inputPlaceholder = document.getElementById('input-placeholder');
+        if (inputWrapper) inputWrapper.style.display = 'none';
+        if (inputPlaceholder) inputPlaceholder.style.display = '';
+    }
+
+    function initOutputPlayer() {
+        if (outputPlayerReady) return;
+        if (!processedPreviewVideo) return;
+        if (processedHlsPlayer) { processedHlsPlayer.destroy(); processedHlsPlayer = null; }
+        if (processedTsPlayer) { processedTsPlayer.destroy(); processedTsPlayer = null; }
+        var outputUrl = '/emby/processed/live.m3u8';
+        var outputVars = _setupVideoForUrl(processedPreviewVideo, { hls: null, ts: null }, outputUrl, true, false, false);
+        processedHlsPlayer = outputVars.hls;
+        processedTsPlayer = outputVars.ts;
+        outputPlayerReady = true;
+        processedPreviewVideo.style.display = '';
+    }
+
+    function teardownInputOnly() {
+        if (inputTsPlayer) { inputTsPlayer.destroy(); inputTsPlayer = null; }
+        if (inputHlsPlayer) { inputHlsPlayer.destroy(); inputHlsPlayer = null; }
+        if (inputPreviewVideo) {
+            inputPreviewVideo.pause();
+            try { inputPreviewVideo.removeAttribute('src'); } catch (e) {}
+            inputPreviewVideo.src = '';
+            try { inputPreviewVideo.load(); } catch (e) {}
+        }
     }
 
     function togglePreview() {
         previewEnabled = !previewEnabled;
         localStorage.setItem('previewEnabled', previewEnabled ? '1' : '0');
         if (!previewEnabled) {
-            teardownPreviewPlayers();
+            teardownInputOnly();
             updatePreviewToggleUi();
-            if (logsInterval) { clearInterval(logsInterval); logsInterval = null; }
             return;
         }
         updatePreviewToggleUi();
-        setupPlayer();
+        var isHls = {{ 'true' if is_hls else 'false' }};
+        var isDirectTs = {{ 'true' if is_direct_ts else 'false' }};
+        var isDirectMp4 = {{ 'true' if is_direct_mp4 else 'false' }};
+        var mode = '{{ mode }}';
+        var inputUrl = null;
+        var isMp4Presentation = false;
+        if (mode === 'presentation') {
+            inputUrl = '/presentation.mp4';
+            isMp4Presentation = true;
+        } else if (mode) {
+            inputUrl = '/preview/live.m3u8';
+        }
+        var useHls = !isMp4Presentation && isHls;
+        var useTs = !isMp4Presentation && isDirectTs;
+        var useMp4 = isMp4Presentation || isDirectMp4;
+        if (inputUrl) {
+            var inputVars = _setupVideoForUrl(inputPreviewVideo, { hls: null, ts: null }, inputUrl, useHls, useTs, useMp4);
+            inputHlsPlayer = inputVars.hls;
+            inputTsPlayer = inputVars.ts;
+        }
         startLogsPolling();
     }
 
@@ -926,38 +952,28 @@
 
     function setupPlayer() {
         if (!inputPreviewVideo || !processedPreviewVideo) return;
+        initOutputPlayer();
+        if (!previewEnabled) {
+            updatePreviewToggleUi();
+            return;
+        }
+        updatePreviewToggleUi();
         var isHls = {{ 'true' if is_hls else 'false' }};
         var isDirectTs = {{ 'true' if is_direct_ts else 'false' }};
         var isDirectMp4 = {{ 'true' if is_direct_mp4 else 'false' }};
         var mode = '{{ mode }}';
-
         var inputUrl = null;
         var isMp4Presentation = false;
-
         if (mode === 'presentation') {
             inputUrl = '/presentation.mp4';
             isMp4Presentation = true;
         } else if (mode) {
             inputUrl = '/preview/live.m3u8';
         }
-
-        if (!previewEnabled) {
-            teardownPreviewPlayers();
-        } else {
-            teardownPreviewPlayers();
-            updatePreviewToggleUi();
-        }
-
         var useHls = !isMp4Presentation && isHls;
         var useTs = !isMp4Presentation && isDirectTs;
         var useMp4 = isMp4Presentation || isDirectMp4;
-
-        var outputUrl = '/emby/processed/live.m3u8';
-        var outputVars = _setupVideoForUrl(processedPreviewVideo, { hls: null, ts: null }, outputUrl, true, false, false);
-        processedHlsPlayer = outputVars.hls;
-        processedTsPlayer = outputVars.ts;
-
-        if (inputUrl && previewEnabled) {
+        if (inputUrl) {
             var inputVars = _setupVideoForUrl(inputPreviewVideo, { hls: null, ts: null }, inputUrl, useHls, useTs, useMp4);
             inputHlsPlayer = inputVars.hls;
             inputTsPlayer = inputVars.ts;
@@ -980,14 +996,33 @@
                 var outputDot = document.getElementById('output-dot');
                 var logDotInput = document.getElementById('log-dot-input');
                 var logDotProcessed = document.getElementById('log-dot-processed');
+                var liveBadge = document.getElementById('live-badge');
+                var inputWrapper = document.getElementById('signal-input-panel');
+                var inputPlaceholder = document.getElementById('input-placeholder');
+                var isConnected = data.mode && data.mode !== null;
+
+                if (liveBadge) {
+                    liveBadge.style.display = isConnected ? '' : 'none';
+                }
 
                 if (inputDot) {
                     if (data.mode === 'presentation') {
                         inputDot.className = 'signal-dot ' + (data.presentation_alive ? 'ok' : 'warn');
-                    } else {
+                    } else if (data.mode) {
                         inputDot.className = 'signal-dot ' + (data.preview_alive ? 'ok' : 'err');
+                    } else {
+                        inputDot.className = 'signal-dot stopped';
                     }
                 }
+
+                if (inputWrapper) {
+                    if (isConnected && previewEnabled) {
+                        inputWrapper.style.display = '';
+                    } else {
+                        inputWrapper.style.display = 'none';
+                    }
+                }
+
                 if (outputDot) {
                     var outOk = data.program_alive;
                     outputDot.className = 'signal-dot ' + (outOk ? 'ok' : 'err');

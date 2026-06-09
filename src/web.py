@@ -514,6 +514,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
     processed_video_encoder = os.environ.get("PROCESSED_VIDEO_ENCODER", "libx264")
     presentation_video_encoder = os.environ.get("PRESENTATION_VIDEO_ENCODER", "libx264")
     nvenc_available = None
+    program_lock = threading.RLock()
     stream_state = {
         "mode": "youtube" if upstream_hls_url else None,
         "source_url": None,
@@ -725,7 +726,8 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         return False
 
     def start_program_stream(input_url: str) -> None:
-        stop_program_stream()
+        with program_lock:
+            stop_program_stream()
         program_hls_dir.mkdir(parents=True, exist_ok=True)
         for item in program_hls_dir.iterdir():
             if item.is_file():
@@ -762,7 +764,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "-hls_time", str(processed_segment_seconds),
             "-hls_list_size", str(processed_effective_list_size),
             "-hls_delete_threshold", str(processed_delete_threshold),
-            "-hls_flags", "delete_segments+append_list+omit_endlist+independent_segments+program_date_time",
+            "-hls_flags", "delete_segments+omit_endlist+independent_segments+program_date_time",
             "-hls_segment_type", "mpegts",
             "-hls_segment_filename", str(segment_pattern),
             str(output_playlist),
@@ -781,7 +783,8 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
     def start_program_fallback() -> None:
         if stream_state.get("program_fallback") and stream_state.get("program_proc") and stream_state["program_proc"].poll() is None:
             return
-        stop_program_stream()
+        with program_lock:
+            stop_program_stream()
         program_hls_dir.mkdir(parents=True, exist_ok=True)
         for item in program_hls_dir.iterdir():
             if item.is_file():
@@ -817,7 +820,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "-hls_time", str(processed_segment_seconds),
             "-hls_list_size", str(processed_effective_list_size),
             "-hls_delete_threshold", str(processed_delete_threshold),
-            "-hls_flags", "delete_segments+append_list+omit_endlist+independent_segments+program_date_time",
+            "-hls_flags", "delete_segments+omit_endlist+independent_segments+program_date_time",
             "-hls_segment_type", "mpegts",
             "-hls_segment_filename", str(segment_pattern),
             str(output_playlist),
@@ -1207,6 +1210,14 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
     })
     playout.start()
 
+    # Reap any ffmpeg process left over from a previous container
+    # instance and clear stale HLS temp dirs.  Must run BEFORE any
+    # start_program_* call so we don't wipe just-created segments.
+    try:
+        cleanup_orphans([preview_hls_dir, processed_hls_dir, presentation_hls_dir, program_hls_dir])
+    except Exception:
+        log.exception("ffmpeg orphan cleanup failed")
+
     # Generate fallback video at startup so it's ready
     try:
         generate_fallback_video()
@@ -1233,13 +1244,6 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         return daily_check_iptv(playout, get_providers())
 
     start_daily_scheduler(_daily_iptv_check)
-
-    # Reap any ffmpeg process left over from a previous container
-    # instance and clear stale HLS temp dirs.
-    try:
-        cleanup_orphans([preview_hls_dir, processed_hls_dir, presentation_hls_dir, program_hls_dir])
-    except Exception:
-        log.exception("ffmpeg orphan cleanup failed")
 
     # Spin up watchdog threads that restart each ffmpeg pipeline if it
     # stops emitting HLS segments.  Adapted from jvdillon/netv's session
@@ -1768,6 +1772,13 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
                 pending_extinf = None
             elif s.startswith("#EXTM3U") or s.startswith("#EXT-X-VERSION") or s.startswith("#EXT-X-TARGETDURATION") or s.startswith("#EXT-X-MEDIA-SEQUENCE") or s.startswith("#EXT-X-INDEPENDENT-SEGMENTS") or s.startswith("#EXT-X-DISCONTINUITY"):
                 header_lines.append(ln)
+        if not segment_blocks:
+            return no_store(Response("Programa aun iniciando.\n", status=503))
+        segment_blocks = [
+            b for b in segment_blocks
+            if b[-1].startswith("/program/live/") and
+            (program_hls_dir / b[-1].split("/")[-1]).exists()
+        ]
         if not segment_blocks:
             return no_store(Response("Programa aun iniciando.\n", status=503))
         out = list(header_lines)
