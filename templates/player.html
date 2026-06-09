@@ -462,7 +462,6 @@
                     <button class="btn btn-sm" onclick="stopEmission()" {% if not connected %}disabled{% endif %}>Detener</button>
                     {% if connected %}
                     <button class="btn btn-sm" id="preview-toggle-btn" onclick="togglePreview()">Preview ON</button>
-                    {% endif %}
                 </div>
                 <div class="digital-clock" id="digital-clock">--:--:--</div>
             </div>
@@ -486,7 +485,23 @@
                     </div>
                     <span class="preview-badge">EN DIRECTO</span>
                 {% else %}
-                    <div class="preview-placeholder">Sin emision</div>
+                    <div class="signal-monitors">
+                        <div class="signal-panel" id="signal-input-panel">
+                            <div class="signal-label">
+                                <span class="signal-dot stopped" id="input-dot"></span>
+                                ENTRADA REAL
+                            </div>
+                            <div class="preview-placeholder" id="input-placeholder">Sin emision activa</div>
+                            <video id="input-preview-video" muted autoplay playsinline controls style="display:none;"></video>
+                        </div>
+                        <div class="signal-panel" id="signal-output-panel">
+                            <div class="signal-label">
+                                <span class="signal-dot" id="output-dot"></span>
+                                SALIDA PROCESADA
+                            </div>
+                            <video id="processed-preview-video" muted autoplay playsinline controls></video>
+                        </div>
+                    </div>
                 {% endif %}
             </div>
             <div class="logs-panel" id="logs-panel">
@@ -842,30 +857,25 @@
         if (btn) {
             btn.textContent = previewEnabled ? 'Preview ON' : 'Preview OFF';
         }
-        var wrapper = document.querySelector('.preview-player');
-        if (wrapper) {
-            if (previewEnabled && '{{ "true" if connected else "false" }}' === 'true') {
-                wrapper.style.display = '';
-            } else {
-                wrapper.style.display = 'none';
-            }
+        var inputWrapper = document.getElementById('signal-input-panel');
+        var inputPlaceholder = document.getElementById('input-placeholder');
+        if (inputWrapper) {
+            inputWrapper.style.display = previewEnabled ? '' : 'none';
+        }
+        if (inputPlaceholder) {
+            inputPlaceholder.style.display = previewEnabled ? 'none' : '';
         }
     }
 
     function teardownPreviewPlayers() {
         if (inputTsPlayer) { inputTsPlayer.destroy(); inputTsPlayer = null; }
         if (inputHlsPlayer) { inputHlsPlayer.destroy(); inputHlsPlayer = null; }
-        if (processedTsPlayer) { processedTsPlayer.destroy(); processedTsPlayer = null; }
-        if (processedHlsPlayer) { processedHlsPlayer.destroy(); processedHlsPlayer = null; }
-        [inputPreviewVideo, processedPreviewVideo].forEach(function(v) {
-            if (!v) return;
-            v.pause();
-            try { v.removeAttribute('src'); } catch (e) {}
-            v.src = '';
-            try { v.load(); } catch (e) {}
-        });
-        var wrapper = document.querySelector('.preview-player');
-        if (wrapper) { wrapper.style.display = 'none'; }
+        if (inputPreviewVideo) {
+            inputPreviewVideo.pause();
+            try { inputPreviewVideo.removeAttribute('src'); } catch (e) {}
+            inputPreviewVideo.src = '';
+            try { inputPreviewVideo.load(); } catch (e) {}
+        }
     }
 
     function togglePreview() {
@@ -915,62 +925,41 @@
 
     function setupPlayer() {
         if (!inputPreviewVideo || !processedPreviewVideo) return;
-        if (!previewEnabled) {
-            teardownPreviewPlayers();
-            return;
-        }
         var isHls = {{ 'true' if is_hls else 'false' }};
         var isDirectTs = {{ 'true' if is_direct_ts else 'false' }};
         var isDirectMp4 = {{ 'true' if is_direct_mp4 else 'false' }};
         var mode = '{{ mode }}';
-        var playbackUrl = '{{ playback_url or "" }}';
 
         var inputUrl = null;
-        var processedUrl = null;
         var isMp4Presentation = false;
 
         if (mode === 'presentation') {
             inputUrl = '/presentation.mp4';
-            processedUrl = null;
             isMp4Presentation = true;
         } else if (mode) {
             inputUrl = '/preview/live.m3u8';
-            processedUrl = playbackUrl || '/emby/processed/live.m3u8';
         }
 
-        if (!inputUrl) {
-            var wrapper = document.querySelector('.preview-player');
-            if (wrapper) wrapper.style.display = 'none';
-            return;
-        }
-
-        teardownPreviewPlayers();
-        var wrapper = document.querySelector('.preview-player');
-        if (wrapper) wrapper.style.display = '';
-
-        updatePreviewToggleUi();
-
-        var signalOutputPanel = document.getElementById('signal-output-panel');
-        if (signalOutputPanel) {
-            signalOutputPanel.style.display = (mode === 'presentation') ? 'none' : '';
-        }
-        var outputDot = document.getElementById('output-dot');
-        if (outputDot) {
-            outputDot.className = 'signal-dot ' + (mode === 'presentation' ? 'warn' : 'err');
+        if (!previewEnabled) {
+            teardownPreviewPlayers();
+        } else {
+            teardownPreviewPlayers();
+            updatePreviewToggleUi();
         }
 
         var useHls = !isMp4Presentation && isHls;
         var useTs = !isMp4Presentation && isDirectTs;
         var useMp4 = isMp4Presentation || isDirectMp4;
 
-        var inputVars = _setupVideoForUrl(inputPreviewVideo, { hls: null, ts: null }, inputUrl, useHls, useTs, useMp4);
-        inputHlsPlayer = inputVars.hls;
-        inputTsPlayer = inputVars.ts;
+        var outputUrl = '/emby/processed/live.m3u8';
+        var outputVars = _setupVideoForUrl(processedPreviewVideo, { hls: null, ts: null }, outputUrl, true, false, false);
+        processedHlsPlayer = outputVars.hls;
+        processedTsPlayer = outputVars.ts;
 
-        if (processedUrl) {
-            var procVars = _setupVideoForUrl(processedPreviewVideo, { hls: null, ts: null }, processedUrl, isHls, isDirectTs, isDirectMp4);
-            processedHlsPlayer = procVars.hls;
-            processedTsPlayer = procVars.ts;
+        if (inputUrl && previewEnabled) {
+            var inputVars = _setupVideoForUrl(inputPreviewVideo, { hls: null, ts: null }, inputUrl, useHls, useTs, useMp4);
+            inputHlsPlayer = inputVars.hls;
+            inputTsPlayer = inputVars.ts;
         }
     }
 
@@ -999,8 +988,8 @@
                     }
                 }
                 if (outputDot) {
-                    var outOk = data.processed_alive && data.mode !== 'presentation';
-                    outputDot.className = 'signal-dot ' + (outOk ? 'ok' : (data.mode === 'presentation' ? 'warn' : 'err'));
+                    var outOk = data.program_alive;
+                    outputDot.className = 'signal-dot ' + (outOk ? 'ok' : 'err');
                 }
                 if (logDotInput) {
                     if (data.mode === 'presentation') {
@@ -1010,7 +999,7 @@
                     }
                 }
                 if (logDotProcessed) {
-                    var procOk = data.processed_alive && data.mode !== 'presentation';
+                    var procOk = data.program_alive;
                     logDotProcessed.className = 'log-pipeline-dot ' + (procOk ? 'ok' : 'off');
                 }
 
@@ -1020,7 +1009,7 @@
                         allLogs.push({ pipe: 'IN', lines: data.preview, alive: data.preview_alive });
                     }
                     if (data.processed && data.processed.length && data.mode !== 'presentation') {
-                        allLogs.push({ pipe: 'OUT', lines: data.processed, alive: data.processed_alive });
+                        allLogs.push({ pipe: 'OUT', lines: data.processed, alive: data.program_alive });
                     }
                     if (data.presentation && data.presentation.length && data.mode === 'presentation') {
                         allLogs.push({ pipe: 'PRES', lines: data.presentation, alive: data.presentation_alive });
