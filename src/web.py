@@ -1735,27 +1735,6 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             return no_store(send_from_directory(preview_hls_dir, filename, mimetype="application/vnd.apple.mpegurl", conditional=True))
         return no_store(send_from_directory(preview_hls_dir, filename, conditional=True))
 
-    @app.route("/processed/live.m3u8")
-    def processed_live_playlist():
-        if not processed_enabled:
-            return no_store(Response("Salida procesada desactivada.\n", status=404))
-        # Always serve the program stream
-        upstream_hls_url = stream_state.get("upstream_hls_url")
-        program_proc = stream_state.get("program_proc")
-        program_dead = program_proc is None or program_proc.poll() is not None
-        if program_dead:
-            if upstream_hls_url:
-                try:
-                    start_program_stream(upstream_hls_url)
-                except Exception as exc:
-                    stream_state["program_error"] = str(exc)
-            elif program_fallback_video.exists():
-                try:
-                    start_program_fallback()
-                except Exception as exc:
-                    stream_state["program_error"] = str(exc)
-        return _wait_for_program_playlist()
-
     def _wait_for_program_playlist():
         playlist_path = program_hls_dir / "live.m3u8"
         wait_steps = max(1, int(processed_startup_wait_seconds / 0.2))
@@ -1797,110 +1776,25 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         playlist = "\n".join(out) + "\n"
         return no_store(Response(playlist, mimetype="application/vnd.apple.mpegurl"))
 
+    @app.route("/processed/live.m3u8")
     def processed_live_playlist():
         if not processed_enabled:
             return no_store(Response("Salida procesada desactivada.\n", status=404))
-
-        # Always serve the program stream (never short-circuit to presentation video)
-        # The program stream is the continuous output that Emby consumes
         upstream_hls_url = stream_state.get("upstream_hls_url")
-        if not upstream_hls_url:
-            # No upstream URL: ensure fallback is running
-            if stream_state.get("program_proc") is None or stream_state.get("program_proc").poll() is not None:
-                if program_fallback_video.exists():
-                    try:
-                        start_program_fallback()
-                    except Exception:
-                        pass
-            return _wait_for_program_playlist()
-
-        playlist_path = program_hls_dir / "live.m3u8"
-        if stream_state.get("program_proc") is None or stream_state.get("program_proc").poll() is not None:
+        program_proc = stream_state.get("program_proc")
+        program_dead = program_proc is None or program_proc.poll() is not None
+        if program_dead:
             if upstream_hls_url:
                 try:
                     start_program_stream(upstream_hls_url)
                 except Exception as exc:
                     stream_state["program_error"] = str(exc)
-                    return no_store(Response("No se pudo iniciar program stream: " + str(exc) + "\n", status=502))
             elif program_fallback_video.exists():
                 try:
                     start_program_fallback()
                 except Exception as exc:
                     stream_state["program_error"] = str(exc)
-                    return no_store(Response("No se pudo iniciar fallback: " + str(exc) + "\n", status=502))
-
-        wait_steps = max(1, int(processed_startup_wait_seconds / 0.2))
-        for _ in range(wait_steps):
-            if playlist_path.exists() and playlist_path.stat().st_size > 0:
-                break
-            time.sleep(0.2)
-
-        if not playlist_path.exists():
-            return no_store(Response("Procesado HLS aun iniciando.\n", status=503))
-
-        raw = playlist_path.read_text(encoding="utf-8", errors="ignore")
-        lines = raw.splitlines()
-
-        header_lines = []
-        segment_blocks: list[list[str]] = []
-        current_block: list[str] = []
-        pending_date_time: str | None = None
-        pending_extinf: str | None = None
-
-        for ln in lines:
-            s = ln.strip()
-            if s.startswith("#EXT-X-PROGRAM-DATE-TIME"):
-                pending_date_time = ln
-            elif s.startswith("#EXTINF:"):
-                pending_extinf = ln
-            elif s and not s.startswith("#"):
-                block = []
-                if pending_date_time:
-                    block.append(pending_date_time)
-                if pending_extinf:
-                    block.append(pending_extinf)
-                block.append(f"/program/live/{s}")
-                segment_blocks.append(block)
-                pending_date_time = None
-                pending_extinf = None
-            elif s.startswith("#EXTM3U") or s.startswith("#EXT-X-VERSION") or s.startswith("#EXT-X-TARGETDURATION") or s.startswith("#EXT-X-MEDIA-SEQUENCE") or s.startswith("#EXT-X-INDEPENDENT-SEGMENTS") or s.startswith("#EXT-X-DISCONTINUITY"):
-                header_lines.append(ln)
-            elif current_block or pending_extinf or pending_date_time:
-                pass
-            else:
-                header_lines.append(ln)
-
-        if not segment_blocks:
-            return no_store(Response("Procesado HLS aun iniciando.\n", status=503))
-
-        total_dur = sum(
-            float(b[1].split(":", 1)[1].split(",", 1)[0]) if len(b) > 1 else processed_segment_seconds
-            for b in segment_blocks
-        )
-
-        cut = len(segment_blocks)
-        delayed = 0.0
-        while cut > 0 and delayed < float(processed_delay_seconds):
-            cut -= 1
-            b = segment_blocks[cut]
-            for ln in b:
-                if ln.startswith("#EXTINF:"):
-                    try:
-                        delayed += float(ln.split(":", 1)[1].split(",", 1)[0])
-                    except Exception:
-                        delayed += float(processed_segment_seconds)
-                    break
-
-        if cut <= 0:
-            return no_store(Response("Procesado acumulando buffer de diferido.\n", status=503))
-
-        out = ["#EXTM3U", "#EXT-X-VERSION:6", "#EXT-X-TARGETDURATION:4",
-               "#EXT-X-MEDIA-SEQUENCE:0", "#EXT-X-INDEPENDENT-SEGMENTS"]
-        for b in segment_blocks[:cut]:
-            out.extend(b)
-
-        playlist = "\n".join(out) + "\n"
-        return no_store(Response(playlist, mimetype="application/vnd.apple.mpegurl"))
+        return _wait_for_program_playlist()
 
     @app.route("/processed/live/<path:filename>")
     def processed_live_file(filename: str):
@@ -1942,6 +1836,8 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         preview_alive = stream_state.get("preview_proc") is not None and stream_state.get("preview_proc").poll() is None
         processed_alive = stream_state.get("processed_proc") is not None and stream_state.get("processed_proc").poll() is None
         presentation_alive = stream_state.get("presentation_proc") is not None and stream_state.get("presentation_proc").poll() is None
+        program_proc = stream_state.get("program_proc")
+        program_alive = program_proc is not None and program_proc.poll() is None
         return jsonify({
             "preview": list(preview_buf),
             "processed": list(processed_buf),
@@ -1952,6 +1848,9 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "preview_alive": preview_alive,
             "processed_alive": processed_alive,
             "presentation_alive": presentation_alive,
+            "program_alive": program_alive,
+            "program_error": stream_state.get("program_error"),
+            "program_fallback": stream_state.get("program_fallback"),
             "source_name": stream_state.get("source_url_name"),
         })
 
