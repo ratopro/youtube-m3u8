@@ -861,6 +861,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         kill_process(stream_state.get("program_proc"))
         stream_state["program_proc"] = None
         stream_state["program_stream_id"] = None
+        stream_state["program_upstream_url"] = None
 
     def start_presentation_stream() -> None:
         stop_preview_stream()
@@ -1296,7 +1297,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         "program",
         lambda: stream_state.get("program_proc"),
         lambda: program_hls_dir,
-        lambda: start_program_fallback() if stream_state.get("program_fallback") else start_program_stream(stream_state.get("program_upstream_url") or str(program_fallback_video)),
+        lambda: start_program_fallback() if (stream_state.get("program_fallback") or not stream_state.get("program_upstream_url")) else start_program_stream(stream_state["program_upstream_url"]),
     )
 
     def _restart_preview():
