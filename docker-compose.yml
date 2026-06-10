@@ -1,11 +1,6 @@
 services:
   youtube-hls:
-    build:
-      context: .
-      args:
-        APP_VERSION: ${APP_VERSION:-dev}
-        APP_COMMIT: ${APP_COMMIT:-unknown}
-        APP_BUILD_DATE: ${APP_BUILD_DATE:-unknown}
+    image: ratopro/youtube-m3u8:latest
     container_name: youtube-hls
     environment:
       CACHE_TTL_SECONDS: "1800"
