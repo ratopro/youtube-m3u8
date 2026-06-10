@@ -729,6 +729,9 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         with program_lock:
             stop_program_stream()
         program_hls_dir.mkdir(parents=True, exist_ok=True)
+        for item in program_hls_dir.iterdir():
+            if item.is_file():
+                item.rename(item.parent / f"_old_{int(time.time())}_{item.name}")
         if not program_fallback_video.exists():
             generate_fallback_video()
         use_encoder = _resolve_encoder(processed_video_encoder)
@@ -783,6 +786,9 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         with program_lock:
             stop_program_stream()
         program_hls_dir.mkdir(parents=True, exist_ok=True)
+        for item in program_hls_dir.iterdir():
+            if item.is_file():
+                item.rename(item.parent / f"_old_{int(time.time())}_{item.name}")
         if not program_fallback_video.exists():
             generate_fallback_video()
         if not program_fallback_video.exists():
