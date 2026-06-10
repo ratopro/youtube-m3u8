@@ -791,7 +791,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "-hls_time", str(processed_segment_seconds),
             "-hls_list_size", "10",
             "-hls_delete_threshold", "4",
-            "-hls_flags", "omit_endlist+program_date_time",
+            "-hls_flags", "omit_endlist",
             "-hls_segment_type", "mpegts",
             "-hls_segment_filename", str(segment_pattern),
             "-start_number", str(int(time.time())),
@@ -848,7 +848,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "-hls_time", str(processed_segment_seconds),
             "-hls_list_size", "10",
             "-hls_delete_threshold", "4",
-            "-hls_flags", "omit_endlist+program_date_time",
+            "-hls_flags", "omit_endlist",
             "-hls_segment_type", "mpegts",
             "-hls_segment_filename", str(segment_pattern),
             "-start_number", str(int(time.time())),
@@ -1776,56 +1776,21 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
 
     def _wait_for_program_playlist():
         playlist_path = program_hls_dir / "live.m3u8"
-        wait_steps = max(1, int(processed_startup_wait_seconds / 0.2))
-        for _ in range(wait_steps):
+        for _ in range(max(1, int(processed_startup_wait_seconds / 0.2))):
             if playlist_path.exists() and playlist_path.stat().st_size > 0:
                 break
             time.sleep(0.2)
         if not playlist_path.exists():
             return no_store(Response("Programa aun iniciando.\n", status=503))
         raw = playlist_path.read_text(encoding="utf-8", errors="ignore")
-        lines = raw.splitlines()
-        header_lines = []
-        segment_blocks = []
-        pending_date_time = None
-        pending_extinf = None
-        for ln in lines:
+        lines = []
+        for ln in raw.splitlines():
             s = ln.strip()
-            if s.startswith("#EXT-X-PROGRAM-DATE-TIME"):
-                pending_date_time = ln
-            elif s.startswith("#EXTINF:"):
-                pending_extinf = ln
-            elif s and not s.startswith("#"):
-                block = []
-                if pending_date_time:
-                    block.append(pending_date_time)
-                if pending_extinf:
-                    block.append(pending_extinf)
-                block.append(f"/program/live/{s}")
-                segment_blocks.append(block)
-                pending_date_time = None
-                pending_extinf = None
-            elif s.startswith("#EXTM3U") or s.startswith("#EXT-X-VERSION") or s.startswith("#EXT-X-TARGETDURATION") or s.startswith("#EXT-X-MEDIA-SEQUENCE") or s.startswith("#EXT-X-INDEPENDENT-SEGMENTS") or s.startswith("#EXT-X-DISCONTINUITY"):
-                header_lines.append(ln)
-        if not segment_blocks:
-            return no_store(Response("Programa aun iniciando.\n", status=503))
-        segment_blocks = [
-            b for b in segment_blocks
-            if b[-1].startswith("/program/live/") and
-            (program_hls_dir / b[-1].split("/")[-1]).exists()
-        ]
-        if not segment_blocks:
-            return no_store(Response("Programa aun iniciando.\n", status=503))
-        out = list(header_lines)
-        if not any("EXT-X-PLAYLIST-TYPE:" in ln for ln in out):
-            for i, ln in enumerate(out):
-                if ln.startswith("#EXTM3U"):
-                    out.insert(i + 1, "#EXT-X-PLAYLIST-TYPE:EVENT")
-                    break
-        for b in segment_blocks:
-            out.extend(b)
-        playlist = "\n".join(out) + "\n"
-        return no_store(Response(playlist, mimetype="application/vnd.apple.mpegurl"))
+            if s and not s.startswith("#") and s.endswith(".ts"):
+                lines.append(f"/program/live/{s}")
+            else:
+                lines.append(ln)
+        return no_store(Response("\n".join(lines) + "\n", mimetype="application/vnd.apple.mpegurl"))
 
     @app.route("/processed/live.m3u8")
     def processed_live_playlist():
