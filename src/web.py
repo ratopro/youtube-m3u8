@@ -729,9 +729,19 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         with program_lock:
             stop_program_stream()
         program_hls_dir.mkdir(parents=True, exist_ok=True)
+        archive_dir = program_hls_dir / f"_archive_{int(time.time())}"
+        archive_dir.mkdir(exist_ok=True)
         for item in program_hls_dir.iterdir():
             if item.is_file():
-                item.rename(item.parent / f"_old_{int(time.time())}_{item.name}")
+                item.rename(archive_dir / item.name)
+        next_seg = 0
+        for f in program_hls_dir.glob("seg_*.ts"):
+            try:
+                n = int(f.stem.split("_")[1])
+                if n >= next_seg:
+                    next_seg = n + 1
+            except (ValueError, IndexError):
+                pass
         if not program_fallback_video.exists():
             generate_fallback_video()
         use_encoder = _resolve_encoder(processed_video_encoder)
@@ -753,7 +763,6 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "-err_detect", "ignore_err",
             "-rw_timeout", "15000000",
             "-re",
-            "-stream_loop", "-1",
             "-i", input_url,
             "-map", "0:v:0", "-map", "0:a:0?",
             "-vf", clock_filter,
@@ -767,6 +776,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "-hls_flags", "omit_endlist+independent_segments+program_date_time",
             "-hls_segment_type", "mpegts",
             "-hls_segment_filename", str(segment_pattern),
+            "-start_number", str(next_seg),
             str(output_playlist),
         ]
         try:
@@ -786,9 +796,19 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         with program_lock:
             stop_program_stream()
         program_hls_dir.mkdir(parents=True, exist_ok=True)
+        archive_dir = program_hls_dir / f"_archive_{int(time.time())}"
+        archive_dir.mkdir(exist_ok=True)
         for item in program_hls_dir.iterdir():
             if item.is_file():
-                item.rename(item.parent / f"_old_{int(time.time())}_{item.name}")
+                item.rename(archive_dir / item.name)
+        next_seg = 0
+        for f in program_hls_dir.glob("seg_*.ts"):
+            try:
+                n = int(f.stem.split("_")[1])
+                if n >= next_seg:
+                    next_seg = n + 1
+            except (ValueError, IndexError):
+                pass
         if not program_fallback_video.exists():
             generate_fallback_video()
         if not program_fallback_video.exists():
@@ -823,6 +843,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "-hls_flags", "omit_endlist+independent_segments+program_date_time",
             "-hls_segment_type", "mpegts",
             "-hls_segment_filename", str(segment_pattern),
+            "-start_number", str(next_seg),
             str(output_playlist),
         ]
         try:
@@ -1800,16 +1821,23 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         program_proc = stream_state.get("program_proc")
         program_dead = program_proc is None or program_proc.poll() is not None
         if program_dead:
-            if upstream_hls_url:
+            if stream_state.get("mode") == "presentation" or not upstream_hls_url:
+                if program_fallback_video.exists():
+                    try:
+                        start_program_fallback()
+                    except Exception as exc:
+                        stream_state["program_error"] = str(exc)
+            else:
+                restart_url = stream_state.get("program_upstream_url") or upstream_hls_url
                 try:
-                    start_program_stream(upstream_hls_url)
+                    start_program_stream(restart_url)
                 except Exception as exc:
                     stream_state["program_error"] = str(exc)
-            elif program_fallback_video.exists():
-                try:
-                    start_program_fallback()
-                except Exception as exc:
-                    stream_state["program_error"] = str(exc)
+                    if program_fallback_video.exists():
+                        try:
+                            start_program_fallback()
+                        except Exception:
+                            pass
         return _wait_for_program_playlist()
 
     @app.route("/processed/live/<path:filename>")
