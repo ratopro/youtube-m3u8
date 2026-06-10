@@ -741,14 +741,6 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         for item in program_hls_dir.iterdir():
             if item.is_file():
                 item.rename(archive_dir / item.name)
-        next_seg = 0
-        for f in program_hls_dir.glob("seg_*.ts"):
-            try:
-                n = int(f.stem.split("_")[1])
-                if n >= next_seg:
-                    next_seg = n + 1
-            except (ValueError, IndexError):
-                pass
         if not program_fallback_video.exists():
             generate_fallback_video()
         use_encoder = _resolve_encoder(processed_video_encoder)
@@ -796,7 +788,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "-hls_flags", "omit_endlist+independent_segments+program_date_time",
             "-hls_segment_type", "mpegts",
             "-hls_segment_filename", str(segment_pattern),
-            "-start_number", str(next_seg),
+            "-start_number", str(int(time.time())),
             str(output_playlist),
         ]
         try:
@@ -821,14 +813,6 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         for item in program_hls_dir.iterdir():
             if item.is_file():
                 item.rename(archive_dir / item.name)
-        next_seg = 0
-        for f in program_hls_dir.glob("seg_*.ts"):
-            try:
-                n = int(f.stem.split("_")[1])
-                if n >= next_seg:
-                    next_seg = n + 1
-            except (ValueError, IndexError):
-                pass
         if not program_fallback_video.exists():
             generate_fallback_video()
         if not program_fallback_video.exists():
@@ -863,7 +847,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "-hls_flags", "omit_endlist+independent_segments+program_date_time",
             "-hls_segment_type", "mpegts",
             "-hls_segment_filename", str(segment_pattern),
-            "-start_number", str(next_seg),
+            "-start_number", str(int(time.time())),
             str(output_playlist),
         ]
         try:
@@ -1828,11 +1812,6 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         if not segment_blocks:
             return no_store(Response("Programa aun iniciando.\n", status=503))
         out = list(header_lines)
-        if not any("EXT-X-PLAYLIST-TYPE:" in ln for ln in out):
-            for i, ln in enumerate(out):
-                if ln.startswith("#EXTM3U"):
-                    out.insert(i + 1, "#EXT-X-PLAYLIST-TYPE:EVENT")
-                    break
         for b in segment_blocks:
             out.extend(b)
         playlist = "\n".join(out) + "\n"
