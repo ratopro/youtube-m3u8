@@ -610,20 +610,21 @@ class PlayoutEngine:
         history = self._state.get("history", [])
         return [h["source_id"] for h in history[-count:] if h.get("success")]
 
-    def get_next_auto_source(self) -> dict | None:
+    def get_next_auto_source(self, exclude_ids: list[str] | None = None) -> dict | None:
         with self.lock:
             current = self.callbacks.get("get_stream_state", lambda: {})()
             current_id = current.get("current_source_id")
             candidates = self._get_auto_candidates()
             if not candidates:
                 return None
+            excluded = set(exclude_ids or [])
+            if current_id:
+                excluded.add(current_id)
             last_few = [h["source_id"] for h in self._state.get("history", [])[-5:] if h.get("success")]
+            for h_id in last_few:
+                excluded.add(h_id)
             if len(candidates) > 1:
-                remaining = [c for c in candidates if c["id"] not in last_few]
-                if remaining:
-                    candidates = remaining
-            if len(candidates) > 1 and current_id:
-                remaining = [c for c in candidates if c["id"] != current_id]
+                remaining = [c for c in candidates if c["id"] not in excluded]
                 if remaining:
                     candidates = remaining
             return candidates[0] if candidates else None

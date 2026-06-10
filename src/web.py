@@ -539,6 +539,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         "current_reason": None,
         "current_calendar_id": None,
         "pending_source": None,
+        "last_previewed_source_id": None,
         "logs": {"preview": [], "processed": [], "presentation": [], "program": []},
     }
 
@@ -2777,6 +2778,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             if not program_fallback_video.exists():
                 generate_fallback_video()
             start_program_stream(str(program_fallback_video))
+            stream_state["last_previewed_source_id"] = None
             stream_state["stream_id"] += 1
             stream_state["mode"] = "presentation"
             stream_state["source_url"] = "Sin canal (negro + reloj)"
@@ -2793,6 +2795,9 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
 
     @app.route("/api/auto/next", methods=["POST"])
     def api_auto_next():
+        last_previewed_id = stream_state.get("last_previewed_source_id")
+        exclude_ids = [last_previewed_id] if last_previewed_id else []
+
         ap = playout.find_next_after_previous()
         if ap:
             source, cal_id = ap
@@ -2804,7 +2809,9 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         else:
             if not playout.is_auto_enabled():
                 return jsonify({"ok": False, "error": "Auto no activo"})
-            source = playout.get_next_auto_source()
+            source = playout.get_next_auto_source(exclude_ids=exclude_ids)
+            if not source:
+                source = playout.get_next_auto_source()
             if not source:
                 return jsonify({"ok": False, "error": "No hay fuentes auto disponibles"})
             stream_state["pending_source"] = {
@@ -2812,6 +2819,8 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
                 "calendar_id": None,
                 "reason": "auto",
             }
+
+        stream_state["last_previewed_source_id"] = source.get("id")
 
         try:
             url = source["url"]
@@ -2838,6 +2847,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             cal_id = pending.get("calendar_id")
             reason = pending.get("reason", "manual")
             stream_state["pending_source"] = None
+            stream_state["last_previewed_source_id"] = None
             if cal_id:
                 playout.set_calendar_played(cal_id)
             ok = activate_source(source, reason, cal_id)
@@ -2851,6 +2861,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         if ap:
             source, cal_id = ap
             playout.set_calendar_played(cal_id)
+            stream_state["last_previewed_source_id"] = None
             ok = activate_source(source, "after_previous", cal_id)
             return jsonify({"ok": ok, "source_name": source.get("name")})
 
@@ -2861,6 +2872,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         if not source:
             return jsonify({"ok": False, "error": "No hay fuentes auto disponibles"})
 
+        stream_state["last_previewed_source_id"] = None
         ok = activate_source(source, "auto", None)
         return jsonify({"ok": ok, "source_name": source.get("name")})
 
