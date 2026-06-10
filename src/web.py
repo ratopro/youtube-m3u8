@@ -760,15 +760,28 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
                        "text='%{localtime}':"
                        "fontcolor=white:fontsize=64:x=w-tw-80:y=h-th-80:"
                        "box=1:boxcolor=black@0.5:boxborderw=12:bordercolor=black:borderw=2")
+        is_local = str(program_fallback_video) in input_url or input_url.endswith(program_fallback_video.name)
+        if is_local:
+            stream_input = str(program_fallback_video)
+            input_opts = ["-stream_loop", "-1"]
+        else:
+            stream_input = input_url
+            input_opts = [
+                "-reconnect", "1",
+                "-reconnect_at_eof", "1",
+                "-reconnect_streamed", "1",
+                "-reconnect_delay_max", "5",
+            ]
         cmd = [
             "ffmpeg",
             "-hide_banner",
             "-loglevel", "error",
             "-fflags", "+genpts+discardcorrupt",
             "-err_detect", "ignore_err",
+            "-rw_timeout", "15000000",
             "-re",
-            "-stream_loop", "-1",
-            "-i", str(program_fallback_video),
+        ] + input_opts + [
+            "-i", stream_input,
             "-map", "0:v:0", "-map", "0:a:0?",
             "-vf", clock_filter,
         ] + encoder_args + [
@@ -792,7 +805,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         stream_state["program_stream_id"] = stream_state["stream_id"]
         stream_state["program_upstream_url"] = input_url
         stream_state["program_error"] = None
-        stream_state["program_fallback"] = True
+        stream_state["program_fallback"] = is_local
         threading.Thread(target=_drain_stderr, args=(stream_state["program_proc"], "program"), daemon=True).start()
 
     def start_program_fallback() -> None:
