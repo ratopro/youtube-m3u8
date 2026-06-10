@@ -710,7 +710,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
                 enc = ["-c:v", "libx264", "-preset", "ultrafast", "-profile:v", "main", "-pix_fmt", "yuv420p", "-b:v", "2000k", "-maxrate", "2500k", "-bufsize", "5000k"]
             font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
             clock_filter = ("drawtext=fontfile=" + font_path + ":"
-                           "text='%{localtime\\:%H\\\\\\\\:%M\\\\\\\\:%S}':"
+                           "text='%{localtime}':"
                            "fontcolor=white:fontsize=80:x=(w-text_w)/2:y=(h-text_h)/2:"
                            "box=1:boxcolor=black@0.5:boxborderw=12:bordercolor=black:borderw=2")
             cmd = [
