@@ -1783,7 +1783,10 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             return no_store(Response("Programa aun iniciando.\n", status=503))
         out = list(header_lines)
         if not any("EXT-X-PLAYLIST-TYPE:" in ln for ln in out):
-            out.insert(0, "#EXT-X-PLAYLIST-TYPE:EVENT")
+            for i, ln in enumerate(out):
+                if ln.startswith("#EXTM3U"):
+                    out.insert(i + 1, "#EXT-X-PLAYLIST-TYPE:EVENT")
+                    break
         for b in segment_blocks:
             out.extend(b)
         playlist = "\n".join(out) + "\n"
