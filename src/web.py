@@ -709,10 +709,15 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             else:
                 enc = ["-c:v", "libx264", "-preset", "ultrafast", "-profile:v", "main", "-pix_fmt", "yuv420p", "-b:v", "2000k", "-maxrate", "2500k", "-bufsize", "5000k"]
             font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+            clock_filter = ("drawtext=fontfile=" + font_path + ":"
+                           "text='%{localtime\\:%H\\\\\\\\:%M\\\\\\\\:%S}':"
+                           "fontcolor=white:fontsize=80:x=(w-text_w)/2:y=(h-text_h)/2:"
+                           "box=1:boxcolor=black@0.5:boxborderw=12:bordercolor=black:borderw=2")
             cmd = [
                 "ffmpeg", "-y",
-                "-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=25:duration=30",
-                "-vf", "drawtext=fontfile=" + font_path + ":text='NO SIGNAL':fontcolor=white:fontsize=64:x=(w-text_w)/2:y=(h-text_h)/2:bordercolor=black:borderw=3",
+                "-f", "lavfi", "-i", "color=size=1920x1080:rate=25:color=black:duration=30",
+                "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000:duration=30",
+                "-vf", clock_filter,
                 "-c:a", "aac", "-b:a", "128k", "-ar", "48000",
             ] + enc + ["-t", "30", str(program_fallback_video)
             ]
@@ -761,9 +766,9 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "-loglevel", "error",
             "-fflags", "+genpts+discardcorrupt",
             "-err_detect", "ignore_err",
-            "-rw_timeout", "15000000",
             "-re",
-            "-i", input_url,
+            "-stream_loop", "-1",
+            "-i", str(program_fallback_video),
             "-map", "0:v:0", "-map", "0:a:0?",
             "-vf", clock_filter,
         ] + encoder_args + [
@@ -787,7 +792,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         stream_state["program_stream_id"] = stream_state["stream_id"]
         stream_state["program_upstream_url"] = input_url
         stream_state["program_error"] = None
-        stream_state["program_fallback"] = False
+        stream_state["program_fallback"] = True
         threading.Thread(target=_drain_stderr, args=(stream_state["program_proc"], "program"), daemon=True).start()
 
     def start_program_fallback() -> None:
@@ -1297,7 +1302,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         "program",
         lambda: stream_state.get("program_proc"),
         lambda: program_hls_dir,
-        lambda: start_program_fallback() if (stream_state.get("program_fallback") or not stream_state.get("program_upstream_url")) else start_program_stream(stream_state["program_upstream_url"]),
+        lambda: start_program_stream(stream_state.get("program_upstream_url") or str(program_fallback_video)),
     )
 
     def _restart_preview():
@@ -1818,27 +1823,14 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
     def processed_live_playlist():
         if not processed_enabled:
             return no_store(Response("Salida procesada desactivada.\n", status=404))
-        upstream_hls_url = stream_state.get("upstream_hls_url")
         program_proc = stream_state.get("program_proc")
         program_dead = program_proc is None or program_proc.poll() is not None
         if program_dead:
-            if stream_state.get("mode") == "presentation" or not upstream_hls_url:
-                if program_fallback_video.exists():
-                    try:
-                        start_program_fallback()
-                    except Exception as exc:
-                        stream_state["program_error"] = str(exc)
-            else:
-                restart_url = stream_state.get("program_upstream_url") or upstream_hls_url
-                try:
-                    start_program_stream(restart_url)
-                except Exception as exc:
-                    stream_state["program_error"] = str(exc)
-                    if program_fallback_video.exists():
-                        try:
-                            start_program_fallback()
-                        except Exception:
-                            pass
+            restart_url = stream_state.get("program_upstream_url") or str(program_fallback_video)
+            try:
+                start_program_stream(restart_url)
+            except Exception as exc:
+                stream_state["program_error"] = str(exc)
         return _wait_for_program_playlist()
 
     @app.route("/processed/live/<path:filename>")
