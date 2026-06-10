@@ -124,7 +124,7 @@ def _build_video_encoder_args(encoder: str, bitrate: str, maxrate: str, bufsize:
     return [
         "-c:v", "libx264",
         "-preset", preset,
-        "-profile:v", "high",
+        "-profile:v", "main",
         "-level", "4.1",
         "-pix_fmt", "yuv420p",
         "-b:v", bitrate,
@@ -779,13 +779,13 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "-map", "0:v:0", "-map", "0:a:0?",
             "-vf", clock_filter,
         ] + encoder_args + [
-            "-g", "50", "-keyint_min", "50", "-sc_threshold", "0",
+            "-g", "100", "-keyint_min", "100", "-sc_threshold", "0",
             "-c:a", "aac", "-b:a", processed_audio_bitrate, "-ar", "48000", "-ac", "2",
             "-f", "hls",
             "-hls_time", str(processed_segment_seconds),
-            "-hls_list_size", str(processed_effective_list_size),
-            "-hls_delete_threshold", str(processed_delete_threshold),
-            "-hls_flags", "omit_endlist+independent_segments+program_date_time",
+            "-hls_list_size", "10",
+            "-hls_delete_threshold", "4",
+            "-hls_flags", "omit_endlist+program_date_time",
             "-hls_segment_type", "mpegts",
             "-hls_segment_filename", str(segment_pattern),
             "-start_number", str(int(time.time())),
@@ -838,13 +838,13 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "-map", "0:v:0", "-map", "0:a:0?",
             "-vf", clock_filter,
         ] + encoder_args + [
-            "-g", "50", "-keyint_min", "50", "-sc_threshold", "0",
+            "-g", "100", "-keyint_min", "100", "-sc_threshold", "0",
             "-c:a", "aac", "-b:a", processed_audio_bitrate, "-ar", "48000", "-ac", "2",
             "-f", "hls",
             "-hls_time", str(processed_segment_seconds),
-            "-hls_list_size", str(processed_effective_list_size),
-            "-hls_delete_threshold", str(processed_delete_threshold),
-            "-hls_flags", "omit_endlist+independent_segments+program_date_time",
+            "-hls_list_size", "10",
+            "-hls_delete_threshold", "4",
+            "-hls_flags", "omit_endlist+program_date_time",
             "-hls_segment_type", "mpegts",
             "-hls_segment_filename", str(segment_pattern),
             "-start_number", str(int(time.time())),
@@ -1812,6 +1812,11 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         if not segment_blocks:
             return no_store(Response("Programa aun iniciando.\n", status=503))
         out = list(header_lines)
+        if not any("EXT-X-PLAYLIST-TYPE:" in ln for ln in out):
+            for i, ln in enumerate(out):
+                if ln.startswith("#EXTM3U"):
+                    out.insert(i + 1, "#EXT-X-PLAYLIST-TYPE:EVENT")
+                    break
         for b in segment_blocks:
             out.extend(b)
         playlist = "\n".join(out) + "\n"
