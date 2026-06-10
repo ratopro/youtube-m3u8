@@ -538,6 +538,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         "current_source_id": None,
         "current_reason": None,
         "current_calendar_id": None,
+        "pending_source": None,
         "logs": {"preview": [], "processed": [], "presentation": [], "program": []},
     }
 
@@ -1422,6 +1423,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             current_source_id=stream_state.get("current_source_id"),
             current_reason=stream_state.get("current_reason"),
             current_calendar_id=stream_state.get("current_calendar_id"),
+            pending_source=stream_state.get("pending_source"),
             overlap_ids=overlap_ids,
             processed_enabled=processed_enabled,
             processed_error=stream_state.get("processed_error"),
@@ -1520,6 +1522,9 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "current_source_name": stream_state.get("source_url_name"),
             "current_entry": current_summary,
             "next_entry": next_summary,
+            "pending_source": {
+                "name": stream_state.get("pending_source", {}).get("source", {}).get("name")
+            } if stream_state.get("pending_source") else None,
         })
 
     @app.route("/sources")
@@ -2788,9 +2793,59 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
 
     @app.route("/api/auto/next", methods=["POST"])
     def api_auto_next():
-        stop_preview_stream()
-        stop_presentation_stream()
-        segment_cache.clear()
+        ap = playout.find_next_after_previous()
+        if ap:
+            source, cal_id = ap
+            stream_state["pending_source"] = {
+                "source": source,
+                "calendar_id": cal_id,
+                "reason": "after_previous",
+            }
+        else:
+            if not playout.is_auto_enabled():
+                return jsonify({"ok": False, "error": "Auto no activo"})
+            source = playout.get_next_auto_source()
+            if not source:
+                return jsonify({"ok": False, "error": "No hay fuentes auto disponibles"})
+            stream_state["pending_source"] = {
+                "source": source,
+                "calendar_id": None,
+                "reason": "auto",
+            }
+
+        try:
+            url = source["url"]
+            source_type = source.get("type", "youtube")
+            hls_url = _hls_url_for_source(url, source_type)
+            if hls_url and not StreamExtractor.is_hls_url(hls_url):
+                start_preview_stream(hls_url)
+            elif hls_url:
+                start_preview_stream(hls_url)
+        except Exception:
+            pass
+
+        return jsonify({
+            "ok": True,
+            "source_name": source.get("name"),
+            "pending": True,
+        })
+
+    @app.route("/api/emit_now", methods=["POST"])
+    def api_emit_now():
+        pending = stream_state.get("pending_source")
+        if pending:
+            source = pending["source"]
+            cal_id = pending.get("calendar_id")
+            reason = pending.get("reason", "manual")
+            stream_state["pending_source"] = None
+            if cal_id:
+                playout.set_calendar_played(cal_id)
+            ok = activate_source(source, reason, cal_id)
+            return jsonify({
+                "ok": ok,
+                "source_name": source.get("name"),
+                "error": None if ok else stream_state.get("error"),
+            })
 
         ap = playout.find_next_after_previous()
         if ap:
@@ -2800,12 +2855,10 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             return jsonify({"ok": ok, "source_name": source.get("name")})
 
         if not playout.is_auto_enabled():
-            force_presentation("auto desactivado")
             return jsonify({"ok": False, "error": "Auto no activo"})
 
         source = playout.get_next_auto_source()
         if not source:
-            force_presentation("sin fuentes auto")
             return jsonify({"ok": False, "error": "No hay fuentes auto disponibles"})
 
         ok = activate_source(source, "auto", None)

@@ -240,6 +240,27 @@
             text-transform: uppercase; letter-spacing: 1px;
         }
         .preview-player { position: relative; }
+        .pending-info {
+            margin-top: 10px;
+            padding: 8px 12px;
+            background: #1e293b;
+            border: 1px solid #f59e0b;
+            border-radius: 6px;
+            color: #fbbf24;
+            font-size: 13px;
+        }
+        .pending-info .pending-dot {
+            display: inline-block;
+            width: 8px; height: 8px;
+            background: #f59e0b;
+            border-radius: 50%;
+            margin-right: 8px;
+            animation: pulse-pending 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse-pending {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
         .digital-clock {
             margin-top: 12px;
             display: inline-block;
@@ -461,6 +482,14 @@
                     <button class="btn btn-sm" onclick="nextAuto()" {% if not auto_enabled %}disabled{% endif %}>Siguiente Auto</button>
                     <button class="btn btn-sm" onclick="stopEmission()" {% if not connected %}disabled{% endif %}>Detener</button>
                     <button class="btn btn-sm" id="preview-toggle-btn" onclick="togglePreview()">Preview ON</button>
+                </div>
+                <div id="pending-info" class="pending-info" {% if not pending_source %}style="display:none;"{% endif %}>
+                    {% if pending_source %}
+                    <span class="pending-dot"></span>
+                    <strong>Seleccionado:</strong>
+                    <span id="pending-source-name">{{ pending_source.source.name }}</span>
+                    &mdash; pulsa Emitir ahora para iniciar
+                    {% endif %}
                 </div>
                 <div class="digital-clock" id="digital-clock">--:--:--</div>
             </div>
@@ -1812,25 +1841,40 @@
         fetch('/api/auto/next', { method: 'POST' })
             .then(function(r) { return r.json(); })
             .then(function(data) {
-                if (data.ok) { location.reload(); }
-                else { showError(data.error || 'No hay fuentes auto disponibles'); }
-            });
+                if (data.ok) {
+                    updatePendingSource(data.source_name);
+                    showPendingInfo(data.source_name);
+                } else {
+                    showError(data.error || 'No hay fuentes auto disponibles');
+                }
+            })
+            .catch(function() { showError('Error de red'); });
     }
 
     function emitNow() {
-        fetch('/api/auto/next', { method: 'POST' })
+        fetch('/api/emit_now', { method: 'POST' })
             .then(function(r) { return r.json(); })
             .then(function(data) {
-                if (data.ok) { location.reload(); return; }
-                fetch('/api/presentation/start', { method: 'POST' })
-                    .then(function(r2) { return r2.json(); })
-                    .then(function(data2) {
-                        if (data2.ok) { location.reload(); }
-                        else { showError(data2.error || 'No se pudo iniciar emision'); }
-                    })
-                    .catch(function() { showError('Error de red'); });
+                if (data.ok) {
+                    location.reload();
+                } else {
+                    showError(data.error || 'No se pudo iniciar emision');
+                }
             })
             .catch(function() { showError('Error de red'); });
+    }
+
+    function updatePendingSource(name) {
+        var el = document.getElementById('pending-source-name');
+        if (el) el.textContent = name || '';
+    }
+
+    function showPendingInfo(name) {
+        var info = document.getElementById('pending-info');
+        if (info) {
+            info.style.display = '';
+            info.textContent = 'Seleccionado: ' + name + ' (pulsa Emitir ahora para iniciar)';
+        }
     }
 
     function validateSource(id) {
