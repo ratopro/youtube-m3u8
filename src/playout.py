@@ -629,6 +629,23 @@ class PlayoutEngine:
                     candidates = remaining
             return candidates[0] if candidates else None
 
+    def get_next_preview_source(self, prev_id: str | None = None, current_id: str | None = None) -> dict | None:
+        with self.lock:
+            candidates = self._get_auto_candidates()
+            if not candidates:
+                return None
+            if current_id:
+                candidates = [c for c in candidates if c["id"] != current_id]
+            if not candidates:
+                return None
+            if not prev_id:
+                return candidates[0]
+            try:
+                idx = next(i for i, c in enumerate(candidates) if c["id"] == prev_id)
+            except StopIteration:
+                return candidates[0]
+            return candidates[(idx + 1) % len(candidates)]
+
     def add_history_entry(self, entry: dict):
         with self.lock:
             if "history" not in self._state:

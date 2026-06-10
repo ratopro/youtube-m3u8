@@ -2795,9 +2795,6 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
 
     @app.route("/api/auto/next", methods=["POST"])
     def api_auto_next():
-        last_previewed_id = stream_state.get("last_previewed_source_id")
-        exclude_ids = [last_previewed_id] if last_previewed_id else []
-
         ap = playout.find_next_after_previous()
         if ap:
             source, cal_id = ap
@@ -2809,9 +2806,10 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         else:
             if not playout.is_auto_enabled():
                 return jsonify({"ok": False, "error": "Auto no activo"})
-            source = playout.get_next_auto_source(exclude_ids=exclude_ids)
-            if not source:
-                source = playout.get_next_auto_source()
+            source = playout.get_next_preview_source(
+                prev_id=stream_state.get("last_previewed_source_id"),
+                current_id=stream_state.get("current_source_id"),
+            )
             if not source:
                 return jsonify({"ok": False, "error": "No hay fuentes auto disponibles"})
             stream_state["pending_source"] = {
