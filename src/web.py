@@ -764,7 +764,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "-hls_time", str(processed_segment_seconds),
             "-hls_list_size", str(processed_effective_list_size),
             "-hls_delete_threshold", str(processed_delete_threshold),
-            "-hls_flags", "delete_segments+omit_endlist+independent_segments+program_date_time",
+            "-hls_flags", "omit_endlist+independent_segments+program_date_time",
             "-hls_segment_type", "mpegts",
             "-hls_segment_filename", str(segment_pattern),
             str(output_playlist),
@@ -820,7 +820,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "-hls_time", str(processed_segment_seconds),
             "-hls_list_size", str(processed_effective_list_size),
             "-hls_delete_threshold", str(processed_delete_threshold),
-            "-hls_flags", "delete_segments+omit_endlist+independent_segments+program_date_time",
+            "-hls_flags", "omit_endlist+independent_segments+program_date_time",
             "-hls_segment_type", "mpegts",
             "-hls_segment_filename", str(segment_pattern),
             str(output_playlist),
@@ -1782,6 +1782,8 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         if not segment_blocks:
             return no_store(Response("Programa aun iniciando.\n", status=503))
         out = list(header_lines)
+        if not any("EXT-X-PLAYLIST-TYPE:" in ln for ln in out):
+            out.insert(0, "#EXT-X-PLAYLIST-TYPE:EVENT")
         for b in segment_blocks:
             out.extend(b)
         playlist = "\n".join(out) + "\n"
