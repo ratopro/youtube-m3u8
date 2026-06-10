@@ -2766,8 +2766,25 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             playout.set_calendar_played(cal_id)
             if activate_source(source, "after_previous", cal_id):
                 return jsonify({"ok": True, "after_previous": True})
-        ok = force_presentation("stop manual")
-        return jsonify({"ok": ok})
+        try:
+            stop_preview_stream()
+            stop_processed_stream()
+            if not program_fallback_video.exists():
+                generate_fallback_video()
+            start_program_stream(str(program_fallback_video))
+            stream_state["stream_id"] += 1
+            stream_state["mode"] = "presentation"
+            stream_state["source_url"] = "Sin canal (negro + reloj)"
+            stream_state["source_url_name"] = "Sin canal"
+            stream_state["upstream_hls_url"] = None
+            stream_state["current_source_id"] = None
+            stream_state["current_reason"] = "stopped"
+            stream_state["current_calendar_id"] = None
+            stream_state["error"] = "Emision detenida. Mostrando canvas negro con reloj."
+            return jsonify({"ok": True, "black_clock": True})
+        except Exception as exc:
+            stream_state["error"] = f"No se pudo detener a negro: {exc}"
+            return jsonify({"ok": False, "error": str(exc)})
 
     @app.route("/api/auto/next", methods=["POST"])
     def api_auto_next():
