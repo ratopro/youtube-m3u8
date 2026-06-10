@@ -162,6 +162,15 @@ from src.ffmpeg_supervisor import (
 )
 
 
+def _cleanup_orphan_segments(hls_dir: Path, max_age_minutes: int = 10) -> None:
+    cutoff = time.time() - max_age_minutes * 60
+    for f in hls_dir.glob("seg_*.ts"):
+        try:
+            if f.stat().st_mtime < cutoff:
+                f.unlink(missing_ok=True)
+        except OSError:
+            pass
+
 def no_store(response: Response) -> Response:
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
@@ -736,11 +745,8 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         with program_lock:
             stop_program_stream()
         program_hls_dir.mkdir(parents=True, exist_ok=True)
-        archive_dir = program_hls_dir / f"_archive_{int(time.time())}"
-        archive_dir.mkdir(exist_ok=True)
-        for item in program_hls_dir.iterdir():
-            if item.is_file():
-                item.rename(archive_dir / item.name)
+        for f in program_hls_dir.glob("live.m3u8*"):
+            f.unlink(missing_ok=True)
         if not program_fallback_video.exists():
             generate_fallback_video()
         use_encoder = _resolve_encoder(processed_video_encoder)
@@ -801,6 +807,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         stream_state["program_error"] = None
         stream_state["program_fallback"] = is_local
         threading.Thread(target=_drain_stderr, args=(stream_state["program_proc"], "program"), daemon=True).start()
+        _cleanup_orphan_segments(program_hls_dir)
 
     def start_program_fallback() -> None:
         if stream_state.get("program_fallback") and stream_state.get("program_proc") and stream_state["program_proc"].poll() is None:
@@ -808,11 +815,8 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         with program_lock:
             stop_program_stream()
         program_hls_dir.mkdir(parents=True, exist_ok=True)
-        archive_dir = program_hls_dir / f"_archive_{int(time.time())}"
-        archive_dir.mkdir(exist_ok=True)
-        for item in program_hls_dir.iterdir():
-            if item.is_file():
-                item.rename(archive_dir / item.name)
+        for f in program_hls_dir.glob("live.m3u8*"):
+            f.unlink(missing_ok=True)
         if not program_fallback_video.exists():
             generate_fallback_video()
         if not program_fallback_video.exists():
@@ -860,6 +864,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         stream_state["program_fallback"] = True
         stream_state["program_upstream_url"] = str(program_fallback_video)
         threading.Thread(target=_drain_stderr, args=(stream_state["program_proc"], "program"), daemon=True).start()
+        _cleanup_orphan_segments(program_hls_dir)
 
     def stop_program_stream() -> None:
         kill_process(stream_state.get("program_proc"))
