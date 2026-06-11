@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sources - Parrilla TV</title>
+    <title>Fuentes - Parrilla TV</title>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -23,11 +23,12 @@
         .nav { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
 
         .card {
-            background: #1f2937;
-            border: 1px solid #374151;
-            border-radius: 12px;
+            background: #1c1f26;
+            border: 1px solid #2d323c;
+            border-radius: 16px;
             padding: 16px;
             margin-bottom: 16px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.25);
         }
 
         .layout-columns {
@@ -42,12 +43,12 @@
             justify-content: space-between;
             align-items: center;
             gap: 8px;
-            margin-bottom: 10px;
+            margin-bottom: 12px;
             cursor: pointer;
             user-select: none;
         }
 
-        .panel-header h3 { margin: 0; }
+        .panel-header h3 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.2px; }
 
         .panel-toggle {
             color: #9ca3af;
@@ -71,6 +72,7 @@
         .btn-success { background: #16a34a; border-color: #16a34a; }
         .btn-success:hover { background: #15803d; }
         .btn-sm { padding: 3px 5px; font-size: 11px; }
+        .del-btn { width: 28px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; font-size: 15px; line-height: 1; }
 
         .input-row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
         .input-row input, .input-row select {
@@ -84,13 +86,15 @@
         .btn-epg { background: #7c3aed; color: #fff; }
         .btn-epg:hover { background: #6d28d9; }
 
-        .epg-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000; display: none; align-items: center; justify-content: center; }
+        .epg-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.45); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 1000; display: none; align-items: center; justify-content: center; }
         .epg-modal-bg.open { display: flex; }
-        .epg-modal { background: #111827; border: 1px solid #374151; border-radius: 10px; width: min(900px, 95vw); max-height: 90vh; display: flex; flex-direction: column; }
-        .epg-modal-header { padding: 14px 18px; border-bottom: 1px solid #374151; display: flex; align-items: center; gap: 10px; }
-        .epg-modal-header h3 { margin: 0; font-size: 16px; flex: 1; }
-        .epg-modal-body { padding: 12px 18px; overflow-y: auto; flex: 1; }
-        .epg-channel-row { border: 1px solid #1f2937; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; display: flex; gap: 12px; align-items: flex-start; }
+        .epg-modal { background: #1c1f26; border: 1px solid #2d323c; border-radius: 18px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.05); width: min(900px, 95vw); max-height: 88vh; display: flex; flex-direction: column; overflow: hidden; }
+        .epg-modal-header { padding: 18px 20px 16px; border-bottom: 1px solid #2d323c; display: flex; align-items: center; gap: 12px; }
+        .epg-modal-header h3 { margin: 0; font-size: 17px; font-weight: 600; flex: 1; letter-spacing: -0.3px; }
+        .epg-modal-body { padding: 16px 20px; overflow-y: auto; flex: 1; }
+        .epg-channel-row { border: 1px solid #2d323c; border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; display: flex; gap: 12px; align-items: flex-start; background: #22262e; }
+        .epg-close-btn { background: #2d323c; border: none; color: #9ca3af; width: 28px; height: 28px; border-radius: 50%; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; flex-shrink: 0; }
+        .epg-close-btn:hover { background: #3d424c; color: #fff; }
         .epg-channel-row.now-matched { border-color: #6ee7b7; }
         .epg-channel-row .ch-name { font-weight: 600; color: #f9fafb; }
         .epg-channel-row .ch-meta { font-size: 12px; color: #9ca3af; margin-top: 2px; }
@@ -106,11 +110,12 @@
         td { padding: 8px 10px; border-bottom: 1px solid #1f2937; vertical-align: middle; word-break: break-word; }
         tr:hover td { background: #111827; }
         #sources-card th, #sources-card td { padding: 6px 8px; }
-        #sources-card th:nth-child(1), #sources-card td:nth-child(1) { width: 11%; }
+        #sources-card th:nth-child(1), #sources-card td:nth-child(1) { width: 10%; }
         #sources-card th:nth-child(2), #sources-card td:nth-child(2) { width: 8%; text-align: center; }
         #sources-card th:nth-child(3), #sources-card td:nth-child(3) { width: 8%; text-align: center; }
-        #sources-card th:nth-child(4), #sources-card td:nth-child(4) { width: 56%; }
-        #sources-card th:nth-child(5), #sources-card td:nth-child(5) { width: 17%; }
+        #sources-card th:nth-child(4), #sources-card td:nth-child(4) { width: 46%; }
+        #sources-card th:nth-child(5), #sources-card td:nth-child(5) { width: 18%; }
+        #sources-card th:nth-child(6), #sources-card td:nth-child(6) { width: 10%; text-align: center; }
         #sources-card td:nth-child(4) { overflow: hidden; }
         #sources-card td:nth-child(4) > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         #sources-card th { cursor: pointer; user-select: none; }
@@ -220,7 +225,7 @@
 <body>
 <main>
     <div class="nav">
-        <h1 style="margin:0;">Sources</h1>
+        <h1 style="margin:0;">Fuentes</h1>
         <h2 style="margin:0; flex:1; color:#9ca3af; font-size:14px;">
             v{{ app_version }}
             {% if build_commit %}<span style="color:#6b7280; font-size:12px;">({{ build_commit }}{% if build_date %} · {{ build_date }}{% endif %})</span>{% endif %}
@@ -232,9 +237,9 @@
 
     <div class="layout-columns">
         <div>
-            <div class="card collapsible collapsed" id="panel-youtube">
+            <div class="card collapsible" id="panel-youtube">
                 <div class="panel-header" onclick="togglePanel('panel-youtube')">
-                    <h3>Añadir YouTube</h3>
+                    <h3>YouTube</h3>
                     <span class="panel-toggle">▼</span>
                 </div>
                 <div class="panel-body">
@@ -243,6 +248,8 @@
                         <input type="url" id="yt-url" placeholder="https://youtube.com/watch?v=...">
                     </div>
                     <button class="btn btn-primary" onclick="addYoutube()">Añadir</button>
+                    <div id="yt-add-msg" style="margin-top:6px; font-size:13px; display:none;"></div>
+                    <div id="yt-sources-list" style="margin-top:10px;"></div>
                 </div>
             </div>
 
@@ -322,7 +329,7 @@
 
     <div class="card" id="sources-card" style="margin-bottom:0;">
         <div class="section-header" style="display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap;">
-            <h3 style="margin:0;">Sources</h3>
+            <h3 style="margin:0;">Fuentes</h3>
             <span id="source-count" style="font-size:13px; color:#9ca3af;"></span>
             <div style="margin-left:auto; display:flex; gap:6px; flex-wrap:wrap;">
                 <input type="text" id="source-name-filter" oninput="applyFilters()" placeholder="Buscar canal por nombre..." style="background:#030712; border:1px solid #4b5563; border-radius:6px; color:#fff; font-size:13px; padding:6px 10px; min-width:160px; flex:1;">
@@ -364,6 +371,7 @@
                     <th data-sort="visible">Visible</th>
                     <th data-sort="name">Nombre</th>
                     <th data-sort="group">Grupo</th>
+                    <th style="width:50px;">Acciones</th>
                 </tr>
             </thead>
             <tbody id="sources-tbody">
@@ -389,6 +397,27 @@
 <script>
     var SOURCES = {{ sources | tojson }};
     var IPTV_PROVIDERS = {{ iptv_providers | tojson }};
+
+    document.addEventListener('click', function(e) {
+        var btn = e.target.closest('.yt-del-btn');
+        if (btn) {
+            var id = btn.getAttribute('data-id');
+            if (id) {
+                deleteSource(id);
+                return;
+            }
+        }
+        var tag = e.target.closest('[data-action="toggleAuto"]');
+        if (tag) {
+            var id = tag.getAttribute('data-id');
+            if (id) { toggleAuto(id); return; }
+        }
+        var cb = e.target.closest('[data-action="toggleEmit"]');
+        if (cb) {
+            var id = cb.getAttribute('data-id');
+            if (id) { toggleEmit(id, cb.checked); return; }
+        }
+    });
     var PAGE_SIZE = 15;
     var currentPage = 0;
     var sortField = 'name';
@@ -478,10 +507,36 @@
                 buildGroupFilter(selectedGroup);
                 buildQualityFilter();
                 renderPage();
+                renderYoutubeSources();
             })
             .catch(function(err) {
                 showMsg('Error recargando fuentes: ' + err.message, true);
             });
+    }
+
+    function renderYoutubeSources() {
+        var list = document.getElementById('yt-sources-list');
+        if (!list) return;
+        var ytSources = SOURCES.filter(function(s) { return s.type === 'youtube'; });
+        if (!ytSources.length) {
+            list.innerHTML = '<div style="color:#6b7280; font-size:13px;">Sin canales YouTube</div>';
+            return;
+        }
+        var html = '<div style="display:flex; align-items:center; gap:8px; padding:0 0 6px; font-size:11px; font-weight:600; color:#9ca3af; text-transform:uppercase; letter-spacing:0.5px; border-bottom:1px solid #374151; margin-bottom:4px;">'
+            + '<span style="flex:1;">Nombre</span>'
+            + '<span style="width:36px; text-align:center;">Auto</span>'
+            + '<span style="width:36px; text-align:center;">Visible</span>'
+            + '<span style="width:28px;"></span>'
+            + '</div>';
+        html += ytSources.map(function(s) {
+            return '<div style="display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid #2d323c; font-size:13px;">'
+                + '<span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + escapeHtml(s.name || s.url) + '</span>'
+                + '<span class="tag ' + (s.auto_enabled ? 'auto-yes' : 'auto-no') + '" data-action="toggleAuto" data-id="' + s.id + '" style="cursor:pointer; font-size:10px; width:36px; text-align:center;">' + (s.auto_enabled ? 'ON' : 'OFF') + '</span>'
+                + '<input type="checkbox" class="emit-check" ' + (s.emit_enabled !== false ? 'checked' : '') + ' data-action="toggleEmit" data-id="' + s.id + '" style="width:36px;">'
+                + '<button class="btn btn-danger btn-sm yt-del-btn" data-id="' + s.id + '" style="padding:2px 6px; width:28px;">✕</button>'
+                + '</div>';
+        }).join('');
+        list.innerHTML = html;
     }
 
     function refreshProvidersUi() {
@@ -622,12 +677,13 @@
 
         var tbody = document.getElementById('sources-tbody');
         if (pageData.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" class="empty">No hay fuentes</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="empty">No hay fuentes</td></tr>';
             document.getElementById('pagination').innerHTML = '';
             return;
         }
         var html = '';
         pageData.forEach(function(s) {
+            if (s.type === 'youtube') return;
             var typeClass = s.type === 'youtube' ? 'yt' : s.type;
             var autoClass = s.auto_enabled ? 'auto-yes' : 'auto-no';
             var autoLabel = s.auto_enabled ? 'ON' : 'OFF';
@@ -639,6 +695,9 @@
                 + '<td data-label="Visible" style="text-align:center;"><input type="checkbox" class="emit-check" ' + (emitEnabled ? 'checked' : '') + ' onchange="toggleEmit(\'' + s.id + '\', this.checked)"></td>'
                 + '<td data-label="Nombre"><span>' + escapeHtml(s.name) + '</span></td>'
                 + '<td data-label="Grupo" style="font-size:12px; color:#9ca3af;">' + escapeHtml(group) + '</td>'
+                + '<td data-label="Acciones" style="text-align:center;">'
+                + '<button class="btn btn-danger btn-sm del-btn" onclick="deleteSource(\'' + s.id + '\')" title="Eliminar">🗑️</button>'
+                + '</td>'
                 + '</tr>';
         });
         tbody.innerHTML = html;
@@ -721,12 +780,32 @@
         var name = document.getElementById('yt-name').value.trim() || 'YouTube';
         var url = document.getElementById('yt-url').value.trim();
         if (!url) { showMsg('Introduce una URL de YouTube', true); return; }
+        var msg = document.getElementById('yt-add-msg');
+        msg.style.display = 'none';
         var form = new FormData();
         form.append('name', name);
         form.append('url', url);
         fetch('/api/sources/add_youtube', { method: 'POST', body: form })
             .then(function(r) { return r.json(); })
-            .then(function(d) { if (d.ok) { refreshPage(); } else { showMsg(d.error || 'Error', true); } });
+            .then(function(d) {
+                if (d.ok) {
+                    document.getElementById('yt-name').value = '';
+                    document.getElementById('yt-url').value = '';
+                    msg.textContent = 'Canal añadido correctamente';
+                    msg.style.color = '#22c55e';
+                    msg.style.display = 'block';
+                    loadSourcesAndRender();
+                } else {
+                    msg.textContent = d.error || 'Error al añadir';
+                    msg.style.color = '#ef4444';
+                    msg.style.display = 'block';
+                }
+            })
+            .catch(function(e) {
+                msg.textContent = 'Error de red';
+                msg.style.color = '#ef4444';
+                msg.style.display = 'block';
+            });
     }
 
     function addHls() {
@@ -830,7 +909,16 @@
         form.append('source_id', id);
         fetch('/api/sources/delete', { method: 'POST', body: form })
             .then(function(r) { return r.json(); })
-            .then(function(d) { if (d.ok) { refreshPage(); } else { showMsg(d.error || 'Error', true); } });
+            .then(function(d) {
+                if (d.ok) {
+                    loadSourcesAndRender();
+                } else {
+                    showMsg(d.error || 'Error al eliminar', true);
+                }
+            })
+            .catch(function(e) {
+                showMsg('Error de red al eliminar', true);
+            });
     }
 
     function probeSource(id) {
@@ -1086,13 +1174,14 @@
     buildGroupFilter();
     buildQualityFilter();
     renderPage();
+    renderYoutubeSources();
 </script>
 
 <div class="epg-modal-bg" id="epg-modal-bg" onclick="if(event.target===this) closeIptvChannels()">
     <div class="epg-modal">
         <div class="epg-modal-header">
             <h3 id="epg-modal-title">Canales IPTV</h3>
-            <button class="btn btn-sm" onclick="closeIptvChannels()">Cerrar</button>
+            <button class="epg-close-btn" onclick="closeIptvChannels()">✕</button>
         </div>
         <div class="epg-modal-body" id="epg-modal-body">
             <div class="epg-empty">Cargando...</div>

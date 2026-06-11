@@ -13,8 +13,8 @@ This module provides:
   It also reads the process stderr in a background thread and logs the
   last few lines if the process dies.
 - A kill helper that prefers SIGTERM and falls back to SIGKILL.
-- A startup helper that kills any orphaned ffmpeg process left behind
-  by a previous container instance and clears stale temp directories.
+- A startup helper that kills orphaned ffmpeg processes owned by this app
+  and clears stale temp directories.
 """
 from __future__ import annotations
 
@@ -237,13 +237,14 @@ class Supervisor(threading.Thread):
 
 
 def cleanup_orphans(extra_roots: Iterable[Path] = ()) -> int:
-    """Kill any ffmpeg process left behind and clean stale temp dirs.
+    """Kill ffmpeg processes left behind by this app and clean stale temp dirs.
 
     Called once during app startup so a previous container instance
     cannot keep holding ports or temp files.  Returns the number of
     ffmpeg processes killed.
     """
     killed = 0
+    roots = [str(root.resolve()) for root in extra_roots if root]
     try:
         result = subprocess.run(
             ["pgrep", "-f", "ffmpeg"],
@@ -255,6 +256,14 @@ def cleanup_orphans(extra_roots: Iterable[Path] = ()) -> int:
             try:
                 pid = int(raw)
             except ValueError:
+                continue
+            cmdline = ""
+            try:
+                raw_cmdline = Path(f"/proc/{pid}/cmdline").read_bytes()
+                cmdline = raw_cmdline.replace(b"\x00", b" ").decode("utf-8", errors="ignore")
+            except OSError:
+                continue
+            if not _looks_like_app_ffmpeg(cmdline, roots):
                 continue
             try:
                 os.kill(pid, signal.SIGKILL)
@@ -277,3 +286,13 @@ def cleanup_orphans(extra_roots: Iterable[Path] = ()) -> int:
     if killed:
         log.info("Cleaned up %d orphaned ffmpeg process(es)", killed)
     return killed
+
+
+def _looks_like_app_ffmpeg(cmdline: str, roots: list[str]) -> bool:
+    if "ffmpeg" not in cmdline:
+        return False
+    if "http://localhost:5000/_relay/feed" in cmdline:
+        return True
+    if "/app/data/fallback.mp4" in cmdline:
+        return True
+    return any(root and root in cmdline for root in roots)

@@ -6,6 +6,7 @@ import math
 import os
 import re
 import secrets
+import select
 import socket
 import subprocess
 import threading
@@ -31,6 +32,10 @@ def is_direct_stream_url(url: str) -> bool:
     return any(lowered.endswith(ext) for ext in (".m3u8", ".ts", ".mp4", ".mkv", ".mov", ".m4v"))
 
 
+youtube_hls_cache: dict[str, tuple[float, str]] = {}
+youtube_hls_ttl_seconds = int(os.environ.get("YOUTUBE_HLS_TTL_SECONDS", "900"))
+
+
 nvenc_available: bool | None = None
 video_accel = "cpu"
 processed_video_encoder = "libx264"
@@ -40,10 +45,118 @@ presentation_video_encoder = "libx264"
 def _hls_url_for_source(url: str, source_type: str) -> str | None:
     if source_type in ("iptv", "hls") or is_direct_stream_url(url):
         return url
+    if source_type == "youtube":
+        now = time.time()
+        cached = youtube_hls_cache.get(url)
+        if cached and now - cached[0] < youtube_hls_ttl_seconds:
+            return cached[1]
+        try:
+            hls_url = StreamExtractor(url).get_hls_url()
+        except Exception:
+            return None
+        youtube_hls_cache[url] = (now, hls_url)
+        return hls_url
     try:
         return StreamExtractor(url).get_hls_url()
     except Exception:
         return None
+
+
+def warm_youtube_hls(source: dict) -> None:
+    if source.get("type") != "youtube":
+        return
+    url = source.get("url", "")
+    if not url or is_direct_stream_url(url):
+        return
+
+    def _warm():
+        _hls_url_for_source(url, "youtube")
+
+    threading.Thread(target=_warm, daemon=True).start()
+
+
+class GStreamerEngine:
+    def __init__(self, exe: str, hls_dir: Path, env: dict | None = None):
+        self.exe = exe
+        self.hls_dir = hls_dir
+        self.env = env or {}
+        self.proc: subprocess.Popen | None = None
+        self._lock = threading.Lock()
+
+    def start(self) -> None:
+        with self._lock:
+            if self.proc and self.proc.poll() is None:
+                return
+            self.hls_dir.mkdir(parents=True, exist_ok=True)
+            child_env = os.environ.copy()
+            child_env.update(self.env)
+            child_env.update({
+                "GSTREAMER_HLS_DIR": str(self.hls_dir),
+                "PROGRAM_HLS_DIR": str(self.hls_dir),
+            })
+            self.proc = subprocess.Popen(
+                [self.exe],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                env=child_env,
+            )
+            threading.Thread(target=self._drain_stderr, daemon=True).start()
+
+    def command(self, cmd: str, timeout: float = 5.0) -> str:
+        with self._lock:
+            if not self.proc or self.proc.poll() is not None:
+                self.start()
+            assert self.proc and self.proc.stdin and self.proc.stdout
+            try:
+                self.proc.stdin.write(cmd + "\n")
+                self.proc.stdin.flush()
+                return self.proc.stdout.readline().strip()
+            except Exception as exc:
+                return f'{{"status":"error","error":"{str(exc)}"}}'
+
+    def set_black(self) -> str:
+        return self.command("BLACK")
+
+    def set_source(self, hls_url: str) -> str:
+        return self.command("SOURCE " + hls_url)
+
+    def status(self) -> str:
+        return self.command("STATUS")
+
+    def stop(self) -> None:
+        with self._lock:
+            if self.proc and self.proc.poll() is None:
+                try:
+                    self.proc.stdin.write("STOP\n")
+                    self.proc.stdin.flush()
+                except Exception:
+                    pass
+                try:
+                    self.proc.wait(timeout=3)
+                except Exception:
+                    kill_process(self.proc)
+            self.proc = None
+
+    def _drain_stdout(self) -> None:
+        try:
+            assert self.proc and self.proc.stdout
+            for line in self.proc.stdout:
+                log.debug("gstreamer_engine stdout: %s", line.strip())
+        except Exception:
+            pass
+
+    def _drain_stderr(self) -> None:
+        try:
+            assert self.proc and self.proc.stderr
+            for line in self.proc.stderr:
+                line = line.strip()
+                if line:
+                    log.info("gstreamer_engine: %s", line)
+        except Exception:
+            pass
 
 
 def _check_and_refresh_source_url(source: dict) -> bool:
@@ -57,7 +170,12 @@ def _check_and_refresh_source_url(source: dict) -> bool:
     current_url = xtream_live_url(provider, int(stream_id))
     if current_url == source.get("url"):
         return False
-    log.info(f"URL rotated for {source['name']}: refreshing from {source.get('url', '')[:60]} -> {current_url[:60]}")
+    log.info(
+        "URL rotated for %s: refreshing from %s -> %s",
+        source["name"],
+        redact_url(source.get("url", ""))[:80],
+        redact_url(current_url)[:80],
+    )
     playout.update_source(source["id"], {"url": current_url})
     return True
 
@@ -170,6 +288,17 @@ def _cleanup_orphan_segments(hls_dir: Path, max_age_minutes: int = 10) -> None:
                 f.unlink(missing_ok=True)
         except OSError:
             pass
+
+def _next_segment_number(hls_dir: Path) -> int:
+    last_num = 0
+    for f in hls_dir.glob("seg_*.ts"):
+        try:
+            num = int(f.stem.split("_")[1])
+            if num > last_num:
+                last_num = num
+        except (IndexError, ValueError):
+            pass
+    return last_num + 1
 
 def no_store(response: Response) -> Response:
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
@@ -382,6 +511,17 @@ def is_public_http_url(url: str) -> bool:
     return True
 
 
+def private_source_urls_allowed() -> bool:
+    return os.environ.get("ALLOW_PRIVATE_SOURCE_URLS", "0").lower() in {"1", "true", "yes", "on"}
+
+
+def is_allowed_source_url(url: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return False
+    return private_source_urls_allowed() or is_public_http_url(url)
+
+
 def redact_url(value: str | None) -> str:
     if not value:
         return ""
@@ -479,7 +619,101 @@ class SegmentCache:
 
 def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None) -> Flask:
     app = Flask(__name__, template_folder="../templates")
-    hls_path = Path(hls_dir).resolve()
+
+    # ── Auth helpers ───────────────────────────────────────────────────────────
+    ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
+
+    def admin_token_enabled() -> bool:
+        return bool(ADMIN_TOKEN)
+
+    PUBLIC_PATH_PREFIXES = (
+        "/emby/",
+        "/program/live/",
+        "/processed/live/",
+        "/preview/live/",
+        "/presentation/live/",
+        "/channels",
+        "/guide",
+        "/static",
+    )
+
+    PUBLIC_PATHS = {
+        "/health",
+        "/api/version",
+        "/api/gpu/status",
+    }
+
+    SENSITIVE_GET_PATHS = {
+        "/api/logs",
+        "/api/sources",
+        "/api/playout/status",
+        "/api/history",
+        "/api/iptv/providers",
+    }
+
+    def is_public_path(path: str) -> bool:
+        if path in PUBLIC_PATHS:
+            return True
+        for prefix in PUBLIC_PATH_PREFIXES:
+            if path.startswith(prefix):
+                return True
+        return False
+
+    def request_needs_auth() -> bool:
+        if not admin_token_enabled():
+            return False
+        if is_public_path(request.path):
+            return False
+        if request.method == "GET" and request.path not in SENSITIVE_GET_PATHS:
+            return False
+        return True
+
+    def provided_admin_token() -> str:
+        return request.headers.get("X-Admin-Token", "") or request.cookies.get("admin_token", "")
+
+    @app.before_request
+    def require_admin_token():
+        if not request_needs_auth():
+            return None
+        if not secrets.compare_digest(provided_admin_token(), ADMIN_TOKEN):
+            resp = jsonify({"ok": False, "error": "No autorizado"})
+            resp.status_code = 401
+            return resp
+
+    @app.after_request
+    def add_security_headers(response):
+        response.headers.set("X-Content-Type-Options", "nosniff")
+        response.headers.set("Referrer-Policy", "no-referrer")
+        response.headers.set("X-Frame-Options", "SAMEORIGIN")
+        response.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        no_store(response)
+        return response
+
+    @app.route("/login", methods=["POST"])
+    def login():
+        token = request.form.get("token", "").strip()
+        if not admin_token_enabled():
+            return jsonify({"ok": False, "error": "Auth no configurada"}), 400
+        if not secrets.compare_digest(token, ADMIN_TOKEN):
+            return jsonify({"ok": False, "error": "Token invalido"}), 401
+        resp = jsonify({"ok": True})
+        resp.set_cookie(
+            "admin_token",
+            token,
+            httponly=True,
+            samesite="Lax",
+            max_age=86400 * 7,
+        )
+        return resp
+
+    @app.route("/logout", methods=["POST"])
+    def logout():
+        resp = jsonify({"ok": True})
+        resp.delete_cookie("admin_token")
+        return resp
+
+    # ── End auth helpers ────────────────────────────────────────────────────────
+
     presentation_video = Path(__file__).resolve().parent.parent / "sofa.mp4"
     presentation_hls_dir = Path(os.environ.get("PRESENTATION_HLS_DIR", "/tmp/presentation-hls"))
     preview_hls_dir = Path(os.environ.get("PREVIEW_HLS_DIR", "/tmp/preview-hls"))
@@ -502,7 +736,9 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
     auto_presentation_on_end = os.environ.get("AUTO_PRESENTATION_ON_END", "1") == "1"
     processed_enabled = os.environ.get("PROCESSED_ENABLED", "1") == "1"
     processed_delay_seconds = int(os.environ.get("PROCESSED_DELAY_SECONDS", "60"))
-    processed_segment_seconds = int(os.environ.get("PROCESSED_SEGMENT_SECONDS", "4"))
+    processed_segment_seconds = int(os.environ.get("PROCESSED_SEGMENT_SECONDS", "2"))
+    use_gstreamer_engine = os.environ.get("USE_GSTREAMER_ENGINE", "0") == "1"
+    gstreamer_engine: GStreamerEngine | None = None
     processed_list_size = int(os.environ.get("PROCESSED_LIST_SIZE", "45"))
     processed_extra_segments = int(os.environ.get("PROCESSED_EXTRA_SEGMENTS", "8"))
     processed_video_bitrate = os.environ.get("PROCESSED_VIDEO_BITRATE", "6000k")
@@ -518,6 +754,8 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
     processed_delay_segments = max(1, math.ceil(processed_delay_seconds / max(1, processed_segment_seconds)))
     processed_effective_list_size = max(processed_list_size, processed_delay_segments + processed_extra_segments)
     processed_delete_threshold = max(4, processed_extra_segments)
+    program_hls_list_size = max(processed_effective_list_size, 45)
+    program_hls_delete_threshold = max(processed_delete_threshold, 8)
     global video_accel, processed_video_encoder, presentation_video_encoder, nvenc_available
     video_accel = os.environ.get("VIDEO_ACCEL", "cpu")
     processed_video_encoder = os.environ.get("PROCESSED_VIDEO_ENCODER", "libx264")
@@ -550,6 +788,9 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         "pending_source": None,
         "last_previewed_source_id": None,
         "logs": {"preview": [], "processed": [], "presentation": [], "program": []},
+        "relay_source_version": 0,
+        "relay_source_config": None,
+        "_fallback_pump": None,
     }
 
     MAX_LOG_LINES = 100
@@ -711,7 +952,14 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         if not program_fallback_video.parent.exists():
             program_fallback_video.parent.mkdir(parents=True, exist_ok=True)
         if program_fallback_video.exists():
-            return True
+            import subprocess as _sub
+            probe = _sub.run(
+                ["ffprobe", "-hide_banner", str(program_fallback_video)],
+                capture_output=True, timeout=10,
+            )
+            if probe.returncode == 0:
+                return True
+            program_fallback_video.unlink()
         try:
             import subprocess as _sub
             use_encoder = _resolve_encoder(processed_video_encoder)
@@ -722,7 +970,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
             clock_filter = ("drawtext=fontfile=" + font_path + ":"
                            "text='%{localtime}':"
-                           "fontcolor=white:fontsize=80:x=(w-text_w)/2:y=(h-text_h)/2:"
+                           "fontcolor=white:fontsize=80:x=w-tw-80:y=h-th-80:"
                            "box=1:boxcolor=black@0.5:boxborderw=12:bordercolor=black:borderw=2")
             cmd = [
                 "ffmpeg", "-y",
@@ -741,12 +989,172 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             print(f"Fallback video generation failed: {exc}")
         return False
 
-    def start_program_stream(input_url: str) -> None:
+    def _start_fallback_pump() -> subprocess.Popen | None:
+        """Run ffmpeg that continuously loops fallback.mp4 to stdout (mpegts).
+        The relay reads from this pump when no channel source is active."""
+        _kill_fallback_pump()
+        if not program_fallback_video.exists():
+            generate_fallback_video()
+        if not program_fallback_video.exists():
+            stream_state["_fallback_pump"] = None
+            return None
+        cmd = [
+            "ffmpeg", "-hide_banner", "-loglevel", "error",
+            "-re",
+            "-stream_loop", "-1",
+            "-i", str(program_fallback_video),
+            "-c", "copy",
+            "-f", "mpegts",
+            "-",
+        ]
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
+        stream_state["_fallback_pump"] = proc
+        return proc
+
+    def _kill_fallback_pump() -> None:
+        old = stream_state.get("_fallback_pump")
+        if old and old.poll() is None:
+            old.kill()
+            try:
+                old.wait(timeout=5)
+            except Exception:
+                pass
+        stream_state["_fallback_pump"] = None
+
+    def _ensure_fallback_pump() -> None:
+        pump = stream_state.get("_fallback_pump")
+        if pump and pump.poll() is None:
+            return
+        _start_fallback_pump()
+
+    def _set_relay_source(source: dict | None, hls_url: str | None = None) -> None:
+        """Change relay source without restarting program ffmpeg.
+        source=None → fallback (black+clock); source=dict → channel source.
+        relay_feed handles killing the pump when IPTV is confirmed ready."""
+        stream_state["relay_source_version"] += 1
+        if source:
+            stream_state["relay_source_config"] = {**source, "_hls_url": hls_url}
+        else:
+            _ensure_fallback_pump()
+            stream_state["relay_source_config"] = None
+
+    def _resolve_relay_hls(config: dict) -> str | None:
+        hls_url = None
+        source_type = config.get("type", "iptv")
+        source_id = config.get("id")
+        cached_hls = config.get("_hls_url")
+        if cached_hls:
+            return cached_hls
+        if source_type in ("iptv", "hls") and source_id and playout:
+            s = playout.find_source_by_id(source_id)
+            if s:
+                _check_and_refresh_source_url(s)
+                hls_url = s["url"]
+        if not hls_url:
+            hls_url = _hls_url_for_source(config.get("source_url", config.get("url", "")), source_type)
+        return hls_url
+
+    def _fallback_chunks(version: int, max_seconds: float | None = None):
+        deadline = None if max_seconds is None else time.time() + max_seconds
+        while True:
+            pump = stream_state.get("_fallback_pump")
+            if not pump or pump.poll() is not None or not pump.stdout:
+                _ensure_fallback_pump()
+                pump = stream_state.get("_fallback_pump")
+            if not pump or pump.poll() is not None or not pump.stdout:
+                return
+            while stream_state["relay_source_version"] == version and (deadline is None or time.time() < deadline):
+                r, _, _ = select.select([pump.stdout], [], [], 0.5)
+                if not r:
+                    continue
+                chunk = pump.stdout.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+
+    @app.route("/_relay/feed")
+    def relay_feed():
+        def generate():
+            while True:
+                version = stream_state["relay_source_version"]
+                config = stream_state.get("relay_source_config")
+                if config:
+                    hls_url = _resolve_relay_hls(config)
+                    if hls_url:
+                        try:
+                            resp = requests.get(hls_url, stream=True, timeout=(2, 3), headers={"User-Agent": "Lavf/ffmpeg 7.1.4"})
+                            for chunk in resp.iter_content(chunk_size=65536):
+                                if stream_state["relay_source_version"] != version:
+                                    break
+                                if chunk:
+                                    _kill_fallback_pump()
+                                    yield chunk
+                        except Exception:
+                            for chunk in _fallback_chunks(version):
+                                yield chunk
+                else:
+                    _ensure_fallback_pump()
+                    pump = stream_state.get("_fallback_pump")
+                    if pump and pump.poll() is None:
+                        try:
+                            while True:
+                                cur_version = stream_state["relay_source_version"]
+                                if cur_version != version:
+                                    new_config = stream_state.get("relay_source_config")
+                                    if new_config is not None:
+                                        hls_url = _resolve_relay_hls(new_config)
+                                        if hls_url:
+                                            try:
+                                                resp = requests.get(hls_url, stream=True, timeout=(2, 3), headers={"User-Agent": "Lavf/ffmpeg 7.1.4"})
+                                                for chunk in resp.iter_content(chunk_size=65536):
+                                                    if stream_state["relay_source_version"] != cur_version:
+                                                        break
+                                                    if chunk:
+                                                        _kill_fallback_pump()
+                                                        yield chunk
+                                            except Exception:
+                                                pass
+                                    break
+                                r, _, _ = select.select([pump.stdout], [], [], 0.5)
+                                if r:
+                                    chunk = pump.stdout.read(65536)
+                                    if not chunk:
+                                        break
+                                    yield chunk
+                        except Exception:
+                            pass
+
+        return Response(generate(), mimetype="video/mp2t")
+
+    def _start_persistent_program_stream() -> None:
+        """Start ONE program stream that reads from the relay endpoint.
+        This is called once at init. Never call again unless it crashes."""
+        nonlocal gstreamer_engine
         with program_lock:
             stop_program_stream()
         program_hls_dir.mkdir(parents=True, exist_ok=True)
-        for f in program_hls_dir.glob("live.m3u8*"):
-            f.unlink(missing_ok=True)
+        if use_gstreamer_engine:
+            if gstreamer_engine is None:
+                gstreamer_engine = GStreamerEngine(
+                    os.environ.get("GSTREAMER_ENGINE_BIN", "/usr/local/bin/gstreamer_engine"),
+                    program_hls_dir,
+                    {
+                        "GSTREAMER_TARGET_DURATION": str(processed_segment_seconds),
+                        "GSTREAMER_MAX_FILES": str(program_hls_list_size),
+                        "GSTREAMER_WIDTH": str(processed_height),
+                        "GSTREAMER_HEIGHT": str(processed_height),
+                    },
+                )
+            gstreamer_engine.start()
+            result = gstreamer_engine.set_black()
+            if '"ok"' not in result and '"status":"ok"' not in result:
+                stream_state["program_error"] = result
+            else:
+                stream_state["program_error"] = None
+            stream_state["program_proc"] = gstreamer_engine.proc
+            stream_state["program_stream_id"] = stream_state["stream_id"]
+            stream_state["program_fallback"] = True
+            return
         if not program_fallback_video.exists():
             generate_fallback_video()
         use_encoder = _resolve_encoder(processed_video_encoder)
@@ -760,41 +1168,34 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
                        "text='%{localtime}':"
                        "fontcolor=white:fontsize=64:x=w-tw-80:y=h-th-80:"
                        "box=1:boxcolor=black@0.5:boxborderw=12:bordercolor=black:borderw=2")
-        is_local = str(program_fallback_video) in input_url or input_url.endswith(program_fallback_video.name)
-        if is_local:
-            stream_input = str(program_fallback_video)
-            input_opts = ["-stream_loop", "-1"]
-        else:
-            stream_input = input_url
-            input_opts = [
-                "-reconnect", "1",
-                "-reconnect_at_eof", "1",
-                "-reconnect_streamed", "1",
-                "-reconnect_delay_max", "5",
-            ]
+        include_clock = stream_state.get("include_clock", False)
+        vf_arg = ["-vf", clock_filter] if include_clock else []
+        relay_url = "http://localhost:5000/_relay/feed"
         cmd = [
             "ffmpeg",
             "-hide_banner",
             "-loglevel", "error",
             "-fflags", "+genpts+discardcorrupt",
             "-err_detect", "ignore_err",
-            "-rw_timeout", "15000000",
+            "-rw_timeout", "60000000",
             "-re",
-        ] + input_opts + [
-            "-i", stream_input,
+            "-reconnect", "1",
+            "-reconnect_at_eof", "1",
+            "-reconnect_streamed", "1",
+            "-reconnect_delay_max", "2",
+            "-i", relay_url,
             "-map", "0:v:0", "-map", "0:a:0?",
-            "-vf", clock_filter,
-        ] + encoder_args + [
-            "-g", "100", "-keyint_min", "100", "-sc_threshold", "0",
+        ] + vf_arg + encoder_args + [
+            "-g", str(25 * processed_segment_seconds), "-keyint_min", str(25 * processed_segment_seconds), "-sc_threshold", "0",
             "-c:a", "aac", "-b:a", processed_audio_bitrate, "-ar", "48000", "-ac", "2",
             "-f", "hls",
             "-hls_time", str(processed_segment_seconds),
-            "-hls_list_size", "10",
-            "-hls_delete_threshold", "4",
-            "-hls_flags", "omit_endlist",
+            "-hls_list_size", str(program_hls_list_size),
+            "-hls_delete_threshold", str(program_hls_delete_threshold),
+            "-hls_flags", "append_list+omit_endlist+independent_segments+program_date_time",
             "-hls_segment_type", "mpegts",
             "-hls_segment_filename", str(segment_pattern),
-            "-start_number", str(int(time.time())),
+            "-start_number", str(_next_segment_number(program_hls_dir)),
             str(output_playlist),
         ]
         try:
@@ -803,74 +1204,20 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             stream_state["program_error"] = f"No se pudo iniciar program stream: {exc}"
             return
         stream_state["program_stream_id"] = stream_state["stream_id"]
-        stream_state["program_upstream_url"] = input_url
-        stream_state["program_error"] = None
-        stream_state["program_fallback"] = is_local
-        threading.Thread(target=_drain_stderr, args=(stream_state["program_proc"], "program"), daemon=True).start()
-        _cleanup_orphan_segments(program_hls_dir)
-
-    def start_program_fallback() -> None:
-        if stream_state.get("program_fallback") and stream_state.get("program_proc") and stream_state["program_proc"].poll() is None:
-            return
-        with program_lock:
-            stop_program_stream()
-        program_hls_dir.mkdir(parents=True, exist_ok=True)
-        for f in program_hls_dir.glob("live.m3u8*"):
-            f.unlink(missing_ok=True)
-        if not program_fallback_video.exists():
-            generate_fallback_video()
-        if not program_fallback_video.exists():
-            stream_state["program_error"] = "No se pudo generar fallback"
-            return
-        use_encoder = _resolve_encoder(processed_video_encoder)
-        encoder_args = _build_video_encoder_args(
-            use_encoder, processed_video_bitrate, processed_video_maxrate, processed_video_bufsize,
-            processed_preset,
-        )
-        output_playlist = program_hls_dir / "live.m3u8"
-        segment_pattern = program_hls_dir / "seg_%06d.ts"
-        clock_filter = ("drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:"
-                       "text='%{localtime}':"
-                       "fontcolor=white:fontsize=64:x=w-tw-80:y=h-th-80:"
-                       "box=1:boxcolor=black@0.5:boxborderw=12:bordercolor=black:borderw=2")
-        cmd = [
-            "ffmpeg",
-            "-hide_banner", "-loglevel", "error",
-            "-re",
-            "-stream_loop", "-1",
-            "-i", str(program_fallback_video),
-            "-map", "0:v:0", "-map", "0:a:0?",
-            "-vf", clock_filter,
-        ] + encoder_args + [
-            "-g", "100", "-keyint_min", "100", "-sc_threshold", "0",
-            "-c:a", "aac", "-b:a", processed_audio_bitrate, "-ar", "48000", "-ac", "2",
-            "-f", "hls",
-            "-hls_time", str(processed_segment_seconds),
-            "-hls_list_size", "10",
-            "-hls_delete_threshold", "4",
-            "-hls_flags", "omit_endlist",
-            "-hls_segment_type", "mpegts",
-            "-hls_segment_filename", str(segment_pattern),
-            "-start_number", str(int(time.time())),
-            str(output_playlist),
-        ]
-        try:
-            stream_state["program_proc"] = subprocess.Popen(cmd, stderr=subprocess.PIPE)
-        except Exception as exc:
-            stream_state["program_error"] = f"No se pudo iniciar fallback: {exc}"
-            return
-        stream_state["program_stream_id"] = stream_state["stream_id"]
         stream_state["program_error"] = None
         stream_state["program_fallback"] = True
-        stream_state["program_upstream_url"] = str(program_fallback_video)
         threading.Thread(target=_drain_stderr, args=(stream_state["program_proc"], "program"), daemon=True).start()
         _cleanup_orphan_segments(program_hls_dir)
 
     def stop_program_stream() -> None:
-        kill_process(stream_state.get("program_proc"))
+        nonlocal gstreamer_engine
+        if use_gstreamer_engine and gstreamer_engine is not None:
+            gstreamer_engine.stop()
+            gstreamer_engine = None
+        else:
+            kill_process(stream_state.get("program_proc"))
         stream_state["program_proc"] = None
         stream_state["program_stream_id"] = None
-        stream_state["program_upstream_url"] = None
 
     def start_presentation_stream() -> None:
         stop_preview_stream()
@@ -1175,6 +1522,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             return False
 
         stop_presentation_stream()
+        stop_preview_stream()
         segment_cache.clear()
 
         _check_and_refresh_source_url(source)
@@ -1207,16 +1555,27 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         stream_state["current_reason"] = reason
         stream_state["current_calendar_id"] = calendar_id
 
+        if hls_url:
+            try:
+                _set_relay_source(source, hls_url=hls_url)
+                if use_gstreamer_engine and gstreamer_engine is not None:
+                    result = gstreamer_engine.set_source(hls_url)
+                    if '"ok"' not in result and '"status":"ok"' not in result:
+                        stream_state["program_error"] = result
+                    else:
+                        stream_state["program_error"] = None
+                        stream_state["program_fallback"] = False
+            except Exception as exc:
+                stream_state["program_error"] = f"No se pudo cambiar source: {exc}"
         if hls_url and not StreamExtractor.is_hls_url(hls_url):
             try:
                 start_preview_stream(hls_url)
             except Exception:
                 pass
-        if hls_url:
-            try:
-                start_program_stream(hls_url)
-            except Exception as exc:
-                stream_state["program_error"] = f"No se pudo iniciar program stream: {exc}"
+
+        if stream_state.get("include_clock", False):
+            stream_state["include_clock"] = False
+            _start_persistent_program_stream()
 
         playout.add_history_entry({
             "timestamp": now_iso(),
@@ -1255,21 +1614,20 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
     except Exception:
         pass
 
-    # Start program stream at startup - fallback if no saved upstream
-    _initial_upstream = stream_state.get("upstream_hls_url")
-    if _initial_upstream:
-        try:
-            start_program_stream(_initial_upstream)
-        except Exception:
-            try:
-                start_program_fallback()
-            except Exception:
-                pass
-    else:
-        try:
-            start_program_fallback()
-        except Exception:
-            pass
+    # Start persistent relay architecture:
+    # 1. Fallback pump runs continuously looping fallback.mp4
+    # 2. Program ffmpeg reads from local relay endpoint, never restarts
+    # 3. Source changes just update what the relay serves
+    try:
+        _ensure_fallback_pump()
+    except Exception:
+        pass
+    try:
+        _start_persistent_program_stream()
+    except Exception:
+        pass
+    # Relay starts with fallback; playout engine will switch to the
+    # appropriate source via activate_source -> _set_relay_source
 
     def _daily_iptv_check():
         return daily_check_iptv(playout, get_providers())
@@ -1306,7 +1664,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         "program",
         lambda: stream_state.get("program_proc"),
         lambda: program_hls_dir,
-        lambda: start_program_stream(stream_state.get("program_upstream_url") or str(program_fallback_video)),
+        lambda: _start_persistent_program_stream(),
     )
 
     def _restart_preview():
@@ -1545,6 +1903,9 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         if not source_url:
             stream_state["error"] = "Introduce una URL valida."
             return redirect(url_for("index"))
+        if not is_allowed_source_url(source_url):
+            stream_state["error"] = "URL no permitida. Usa http/https con host publico."
+            return redirect(url_for("index"))
 
         try:
             hls_url = StreamExtractor(source_url).get_hls_url()
@@ -1576,6 +1937,9 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         if not iptv_url:
             stream_state["error"] = "Introduce una URL de lista IPTV."
             return redirect(url_for("index"))
+        if not is_allowed_source_url(iptv_url):
+            stream_state["error"] = "URL IPTV no permitida. Usa http/https con host publico."
+            return redirect(url_for("index"))
 
         try:
             r = requests.get(iptv_url, timeout=30)
@@ -1603,6 +1967,9 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         channel_url = request.form.get("channel_url", "").strip()
         if not channel_url:
             stream_state["error"] = "Selecciona un canal."
+            return redirect(url_for("index"))
+        if not is_allowed_source_url(channel_url):
+            stream_state["error"] = "URL de canal no permitida."
             return redirect(url_for("index"))
 
         channel_name = channel_url
@@ -1636,15 +2003,20 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
                 pass
         if hls_url:
             try:
-                start_program_stream(hls_url)
+                _set_relay_source({
+                    "id": None,
+                    "url": channel_url,
+                    "type": "iptv",
+                    "name": channel_name,
+                })
             except Exception as exc:
-                stream_state["program_error"] = f"No se pudo iniciar program stream: {exc}"
+                stream_state["program_error"] = f"No se pudo cambiar source: {exc}"
         return redirect(url_for("index"))
 
     @app.route("/presentation", methods=["POST"])
     def enable_presentation():
         if stream_state["mode"]:
-            stream_state["error"] = "Desconecta la emision actual antes de activar el video presentacion."
+            stream_state["error"] = "Desconecta la emision actual antes de emitir un canal."
             return redirect(url_for("index"))
 
         if not presentation_video.exists():
@@ -1774,7 +2146,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             return no_store(send_from_directory(preview_hls_dir, filename, mimetype="application/vnd.apple.mpegurl", conditional=True))
         return no_store(send_from_directory(preview_hls_dir, filename, conditional=True))
 
-    def _wait_for_program_playlist():
+    def _wait_for_program_playlist(absolute_urls: bool = False):
         playlist_path = program_hls_dir / "live.m3u8"
         for _ in range(max(1, int(processed_startup_wait_seconds / 0.2))):
             if playlist_path.exists() and playlist_path.stat().st_size > 0:
@@ -1787,7 +2159,10 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         for ln in raw.splitlines():
             s = ln.strip()
             if s and not s.startswith("#") and s.endswith(".ts"):
-                lines.append(f"/program/live/{s}")
+                seg_url = f"/program/live/{s}"
+                if absolute_urls:
+                    seg_url = absolute_url(seg_url)
+                lines.append(seg_url)
             else:
                 lines.append(ln)
         return no_store(Response("\n".join(lines) + "\n", mimetype="application/vnd.apple.mpegurl"))
@@ -1799,9 +2174,8 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         program_proc = stream_state.get("program_proc")
         program_dead = program_proc is None or program_proc.poll() is not None
         if program_dead:
-            restart_url = stream_state.get("program_upstream_url") or str(program_fallback_video)
             try:
-                start_program_stream(restart_url)
+                _start_persistent_program_stream()
             except Exception as exc:
                 stream_state["program_error"] = str(exc)
         return _wait_for_program_playlist()
@@ -1836,6 +2210,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "build_date": build_date or None,
             "python": platform.python_version(),
             "tz": os.environ.get("TZ", "UTC"),
+            "auth_required": admin_token_enabled(),
         })
 
     @app.route("/api/logs")
@@ -1863,6 +2238,12 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "program_fallback": stream_state.get("program_fallback"),
             "source_name": stream_state.get("source_url_name"),
         })
+
+    @app.route("/api/gstreamer/status")
+    def api_gstreamer_status():
+        if not use_gstreamer_engine or gstreamer_engine is None:
+            return jsonify({"ok": False, "error": "GStreamer engine disabled"})
+        return Response(gstreamer_engine.status() + "\n", mimetype="application/json")
 
     @app.route("/api/gpu/status")
     def api_gpu_status():
@@ -1892,11 +2273,25 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
 
     @app.route("/emby/live.m3u8")
     def emby_live_playlist():
-        return live_playlist()
+        program_proc = stream_state.get("program_proc")
+        program_dead = program_proc is None or program_proc.poll() is not None
+        if program_dead:
+            try:
+                _start_persistent_program_stream()
+            except Exception as exc:
+                stream_state["program_error"] = str(exc)
+        return _wait_for_program_playlist(absolute_urls=True)
 
     @app.route("/emby/live-max.m3u8")
     def emby_live_max_playlist():
-        return live_max_playlist()
+        program_proc = stream_state.get("program_proc")
+        program_dead = program_proc is None or program_proc.poll() is not None
+        if program_dead:
+            try:
+                _start_persistent_program_stream()
+            except Exception as exc:
+                stream_state["program_error"] = str(exc)
+        return _wait_for_program_playlist(absolute_urls=True)
 
     @app.route("/emby/processed/live.m3u8")
     def emby_processed_live_playlist():
@@ -1945,10 +2340,13 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             return no_store(Response("No hay ningun directo conectado.\n", status=404))
 
         if not StreamExtractor.is_hls_url(upstream_hls_url):
-            return no_store(Response(
-                direct_media_playlist("/emby/direct.mp4"),
-                mimetype="application/vnd.apple.mpegurl",
-            ))
+            program_proc = stream_state.get("program_proc")
+            if program_proc is None or program_proc.poll() is not None:
+                try:
+                    _start_persistent_program_stream()
+                except Exception as exc:
+                    stream_state["program_error"] = str(exc)
+            return _wait_for_program_playlist(absolute_urls=True)
 
         return live_playlist()
 
@@ -1969,6 +2367,14 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
 
     @app.route("/live.m3u8")
     def live_playlist():
+        if stream_state["mode"] == "black":
+            program_proc = stream_state.get("program_proc")
+            if program_proc is None or program_proc.poll() is not None:
+                try:
+                    _start_persistent_program_stream()
+                except Exception as exc:
+                    stream_state["program_error"] = str(exc)
+            return _wait_for_program_playlist(absolute_urls=True)
         if stream_state["mode"] == "presentation":
             return presentation_m3u8()
 
@@ -1979,10 +2385,13 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             return Response("No hay ningun directo conectado.\n", status=404)
 
         if not StreamExtractor.is_hls_url(upstream_hls_url):
-            return no_store(Response(
-                direct_media_playlist("/current/stream.ts"),
-                mimetype="application/vnd.apple.mpegurl",
-            ))
+            program_proc = stream_state.get("program_proc")
+            if program_proc is None or program_proc.poll() is not None:
+                try:
+                    _start_persistent_program_stream()
+                except Exception as exc:
+                    stream_state["program_error"] = str(exc)
+            return _wait_for_program_playlist(absolute_urls=True)
 
         try:
             response = requests.get(upstream_hls_url, timeout=15)
@@ -2009,6 +2418,14 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
 
     @app.route("/live-max.m3u8")
     def live_max_playlist():
+        if stream_state["mode"] == "black":
+            program_proc = stream_state.get("program_proc")
+            if program_proc is None or program_proc.poll() is not None:
+                try:
+                    _start_persistent_program_stream()
+                except Exception as exc:
+                    stream_state["program_error"] = str(exc)
+            return _wait_for_program_playlist(absolute_urls=True)
         if stream_state["mode"] == "presentation":
             return presentation_m3u8()
 
@@ -2019,10 +2436,13 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             return Response("No hay ningun directo conectado.\n", status=404)
 
         if not StreamExtractor.is_hls_url(upstream_hls_url):
-            return no_store(Response(
-                direct_media_playlist("/current/stream.ts"),
-                mimetype="application/vnd.apple.mpegurl",
-            ))
+            program_proc = stream_state.get("program_proc")
+            if program_proc is None or program_proc.poll() is not None:
+                try:
+                    _start_persistent_program_stream()
+                except Exception as exc:
+                    stream_state["program_error"] = str(exc)
+            return _wait_for_program_playlist(absolute_urls=True)
 
         try:
             response = requests.get(upstream_hls_url, timeout=15)
@@ -2156,10 +2576,6 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
     def proxy_media():
         return proxy_response("video/mp4")
 
-    @app.route("/hls/<path:filename>")
-    def hls_file(filename: str):
-        return send_from_directory(hls_path, filename)
-
     # ----- API endpoints for TV playout -----
 
     @app.route("/api/sources", methods=["GET"])
@@ -2175,6 +2591,8 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         url = request.form.get("url", "").strip()
         if not url:
             return jsonify({"ok": False, "error": "URL requerida"})
+        if not is_allowed_source_url(url):
+            return jsonify({"ok": False, "error": "URL no permitida"})
         meta = {}
         try:
             md = StreamExtractor(url).get_metadata()
@@ -2194,6 +2612,8 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         return jsonify({"ok": True, "source_id": src_id})
 
     def probe_hls(url: str) -> dict:
+        if not is_allowed_source_url(url):
+            raise ValueError("URL no permitida. Usa http/https con host publico.")
         try:
             resp = requests.get(url, timeout=15)
             resp.raise_for_status()
@@ -2221,6 +2641,8 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         url = request.form.get("url", "").strip()
         if not url:
             return jsonify({"ok": False, "error": "URL requerida"})
+        if not is_allowed_source_url(url):
+            return jsonify({"ok": False, "error": "URL no permitida"})
         meta = probe_hls(url)
         src_id = playout.add_source({
             "name": name,
@@ -2235,6 +2657,8 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         iptv_url = request.form.get("iptv_url", "").strip()
         if not iptv_url:
             return jsonify({"ok": False, "error": "URL requerida", "channels": []})
+        if not is_allowed_source_url(iptv_url):
+            return jsonify({"ok": False, "error": "URL no permitida", "channels": []})
         try:
             r = requests.get(iptv_url, timeout=30)
             r.raise_for_status()
@@ -2249,6 +2673,8 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         url = request.form.get("url", "").strip()
         if not url:
             return jsonify({"ok": False, "error": "URL requerida"})
+        if not is_allowed_source_url(url):
+            return jsonify({"ok": False, "error": "URL no permitida"})
         src_id = playout.add_source({
             "name": name,
             "type": "iptv",
@@ -2605,12 +3031,18 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         if not source:
             return jsonify({"ok": False, "error": "Fuente no encontrada"})
         title = source.get("name", "Programa")
+        has_duration = bool(source.get("duration_seconds"))
+        existing = playout.get_calendar(date)
+        is_first = not existing
+        start_mode = "after_previous" if (is_first or not has_duration) else "time"
         cal_id = playout.insert_calendar_entry({
             "date": date,
             "source_id": source_id,
             "title": title,
+            "start_mode": start_mode,
         }, insert_before)
         if cal_id:
+            warm_youtube_hls(source)
             thread = threading.Thread(target=_enrich_calendar_with_epg, args=(cal_id, source), daemon=True)
             thread.start()
         entries = playout.get_calendar(date)
@@ -2627,8 +3059,13 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         start_mode = request.form.get("start_mode", "time")
         if not date or not source_id:
             return jsonify({"ok": False, "error": "date y source_id requeridos"})
+        source = playout.find_source_by_id(source_id)
+        if source and not source.get("duration_seconds"):
+            start_mode = "after_previous"
         if start_mode != "after_previous" and not time_val:
             return jsonify({"ok": False, "error": "time requerido para programas con hora"})
+        if source and source.get("type") == "youtube":
+            warm_youtube_hls(source)
         cal_id = playout.add_calendar_entry({
             "date": date,
             "time": time_val,
@@ -2727,21 +3164,19 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             if activate_source(source, "after_previous", cal_id):
                 return jsonify({"ok": True, "after_previous": True})
         try:
-            stop_preview_stream()
-            stop_processed_stream()
-            if not program_fallback_video.exists():
-                generate_fallback_video()
-            start_program_stream(str(program_fallback_video))
+            _set_relay_source(None)
             stream_state["last_previewed_source_id"] = None
             stream_state["stream_id"] += 1
-            stream_state["mode"] = "presentation"
-            stream_state["source_url"] = "Sin canal (negro + reloj)"
-            stream_state["source_url_name"] = "Sin canal"
+            stream_state["mode"] = "black"
+            stream_state["source_url"] = "Pantalla negra con reloj"
+            stream_state["source_url_name"] = "Negro + reloj"
             stream_state["upstream_hls_url"] = None
             stream_state["current_source_id"] = None
-            stream_state["current_reason"] = "stopped"
+            stream_state["current_reason"] = "black"
             stream_state["current_calendar_id"] = None
-            stream_state["error"] = "Emision detenida. Mostrando canvas negro con reloj."
+            stream_state["error"] = "Mostrando pantalla negra con reloj."
+            stream_state["include_clock"] = True
+            _start_persistent_program_stream()
             return jsonify({"ok": True, "black_clock": True})
         except Exception as exc:
             stream_state["error"] = f"No se pudo detener a negro: {exc}"
@@ -2793,8 +3228,10 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
 
     @app.route("/api/emit_now", methods=["POST"])
     def api_emit_now():
+        mode = request.args.get("mode", "")
+        calendar_date = request.args.get("date", "").strip() or None
         pending = stream_state.get("pending_source")
-        if pending:
+        if mode != "program" and pending:
             source = pending["source"]
             cal_id = pending.get("calendar_id")
             reason = pending.get("reason", "manual")
@@ -2809,13 +3246,18 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
                 "error": None if ok else stream_state.get("error"),
             })
 
-        ap = playout.find_next_after_previous()
+        ap = playout.find_first_calendar_entry(calendar_date) if mode == "program" else playout.find_next_after_previous()
+        if not ap and mode == "program":
+            ap = playout.find_first_calendar_entry(calendar_date, include_played=True)
         if ap:
             source, cal_id = ap
             playout.set_calendar_played(cal_id)
             stream_state["last_previewed_source_id"] = None
-            ok = activate_source(source, "after_previous", cal_id)
+            ok = activate_source(source, "program", cal_id)
             return jsonify({"ok": ok, "source_name": source.get("name")})
+
+        if mode == "program":
+            return jsonify({"ok": False, "error": "No hay programas pendientes"})
 
         if not playout.is_auto_enabled():
             return jsonify({"ok": False, "error": "Auto no activo"})
@@ -2854,6 +3296,8 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         error_msg = None
 
         try:
+            if not is_allowed_source_url(url):
+                raise ValueError("URL no permitida")
             if source_type == "hls" or ".m3u8" in url:
                 resp = requests.head(url, timeout=10, allow_redirects=True)
                 resp.raise_for_status()
@@ -2878,7 +3322,10 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             updates["name"] = name.strip()
         url = request.form.get("url")
         if url is not None:
-            updates["url"] = url.strip()
+            url = url.strip()
+            if not is_allowed_source_url(url):
+                return jsonify({"ok": False, "error": "URL no permitida"})
+            updates["url"] = url
             source_type = request.form.get("type") or playout.find_source_by_id(source_id).get("type", "youtube")
             if source_type == "youtube":
                 try:

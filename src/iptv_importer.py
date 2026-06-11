@@ -1,5 +1,4 @@
 import difflib
-import io
 import re
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -104,22 +103,6 @@ def fetch_channels(provider: dict, category_id: str) -> list[dict]:
         return json.loads(r.read().decode())
 
 
-def fetch_short_epg(provider: dict, stream_id: int | str, limit: int = 12) -> list[dict]:
-    params = (
-        f"username={provider['username']}&password={provider['password']}"
-        f"&action=get_short_epg&stream_id={stream_id}&limit={int(limit)}"
-    )
-    url = f"{provider['dns']}/player_api.php?{params}"
-    req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urlopen(req, timeout=30) as r:
-        data = json.loads(r.read().decode())
-    if isinstance(data, dict):
-        listings = data.get("epg_listings")
-        if isinstance(listings, list):
-            return listings
-    return []
-
-
 def _parse_epg_source(source, channel_ids: set[str] | None = None, include_programmes: bool = True) -> dict:
     channels: dict[str, dict] = {}
     programmes: dict[str, list[dict]] = {}
@@ -167,10 +150,6 @@ def _parse_epg_source(source, channel_ids: set[str] | None = None, include_progr
     for ch_id in programmes:
         programmes[ch_id].sort(key=lambda x: x.get("start", ""))
     return {"channels": channels, "programmes": programmes}
-
-
-def parse_epg_full(raw: bytes) -> dict:
-    return _parse_epg_source(io.BytesIO(raw))
 
 
 def parse_epg_file(path: Path, channel_ids: set[str] | None = None, include_programmes: bool = True) -> dict:
@@ -224,33 +203,6 @@ EPG_DIR = Path("data/epg")
 def epg_cache_path(provider_id: str) -> Path:
     safe = re.sub(r"[^a-zA-Z0-9_-]", "_", provider_id)
     return EPG_DIR / f"{safe}.xml"
-
-
-def fetch_xtream_xmltv(provider: dict) -> dict:
-    dns_candidates = [provider["dns"]]
-    if provider.get("dns_alt"):
-        dns_candidates.append(provider["dns_alt"])
-    last_error = None
-    for dns in dns_candidates:
-        try:
-            cached = ensure_xtream_xmltv_cache({**provider, "dns": dns, "dns_alt": None}, force=True)
-            data = parse_epg_file(cached)
-            data["source_url"] = "xtream"
-            data["cached"] = False
-            return data
-        except Exception as exc:
-            last_error = exc
-            continue
-    cached = epg_cache_path(provider["id"])
-    if cached.exists():
-        try:
-            data = parse_epg_file(cached)
-            data["cached"] = True
-            data["source_url"] = "cache"
-            return data
-        except Exception:
-            pass
-    raise RuntimeError(f"No se pudo descargar XMLTV del proveedor: {last_error}")
 
 
 def _epg_match_key(name: str) -> str:

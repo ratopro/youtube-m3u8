@@ -78,15 +78,3 @@ class StreamExtractor:
             "duration_label": duration_label if not is_live else "Directo",
             "is_live": is_live,
         }
-
-    def extract_streams(self) -> list[dict[str, Any]]:
-        return [{
-            "title": "Stream HLS",
-            "resolution": "Auto",
-            "url": self.get_hls_url(),
-            "type": "hls",
-        }]
-
-
-# Backward compatibility alias
-YouTubeExtractor = StreamExtractor

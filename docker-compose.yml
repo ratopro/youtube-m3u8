@@ -13,14 +13,19 @@ services:
       APP_TZ: "Europe/Madrid"
       FFMPEG_STARTUP_GRACE_SEC: "60"
       PROCESSED_STARTUP_WAIT_SECONDS: "30"
+      PROCESSED_SEGMENT_SECONDS: "1"
       PROCESSED_DELAY_SECONDS: "15"
       VIDEO_ACCEL: "auto"
       PROCESSED_VIDEO_ENCODER: "libx264"
       PRESENTATION_VIDEO_ENCODER: "libx264"
       PROGRAM_HLS_DIR: "/app/data/program_hls"
       PROGRAM_FALLBACK_VIDEO: "/app/data/fallback.mp4"
+      USE_GSTREAMER_ENGINE: "1"
+      GSTREAMER_HLS_DIR: "/app/data/program_hls"
+      GSTREAMER_TARGET_DURATION: "2"
+      GSTREAMER_MAX_FILES: "45"
     ports:
       - "5058:5000"
     volumes:
       - ./data:/app/data
-    restart: "no"
+    restart: unless-stopped

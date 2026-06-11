@@ -1,4 +1,10 @@
 data/
 sofa.mp4
+drm/
+venv/
+.unifymemfile/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 *.pyc
 __pycache__/

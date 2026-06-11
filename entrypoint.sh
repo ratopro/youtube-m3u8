@@ -5,10 +5,8 @@ set -e
 # Forzamos que el contenido sea escribible por appuser para que SQLite
 # pueda crear app.db, state.json y el cache de EPG.
 if [ -d /app/data ]; then
-    if [ "$(stat -c '%u' /app/data 2>/dev/null || echo 0)" != "10001" ]; then
-        chown -R appuser:appuser /app/data 2>/dev/null || true
-    fi
-    chmod -R u+rwX,g+rwX,o+rwX /app/data 2>/dev/null || true
+    chown -R appuser:appuser /app/data 2>/dev/null || true
+    chmod -R u+rwX,go-rwx /app/data 2>/dev/null || true
 fi
 
 # Create the HLS temp directories and hand them to appuser.  ffmpeg
@@ -20,4 +18,3 @@ chmod 755 /tmp/presentation-hls /tmp/preview-hls /tmp/processed-hls /tmp/youtube
 
 # Drop privileges to appuser for the actual application process.
 exec gosu appuser "$@"
-

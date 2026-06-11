@@ -597,6 +597,20 @@ class PlayoutEngine:
                         return (source, entry["id"])
         return None
 
+    def find_first_calendar_entry(self, date: str | None = None, include_played: bool = False) -> tuple[dict, str] | None:
+        with self.lock:
+            target_date = date or now_date()
+            for entry in self._state["calendar"]:
+                if (
+                    entry["date"] == target_date
+                    and entry.get("enabled", True)
+                    and (include_played or entry.get("status") != "played")
+                ):
+                    source = self._find_source(entry["source_id"])
+                    if source:
+                        return (source, entry["id"])
+        return None
+
     def has_upcoming_calendar(self) -> bool:
         with self.lock:
             today = now_date()

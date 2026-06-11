@@ -19,9 +19,19 @@ RUN apt-get update \
         ca-certificates \
         curl \
         ffmpeg \
+        g++ \
         gosu \
         nodejs \
+        pkg-config \
         tzdata \
+        libglib2.0-dev \
+        libgstreamer1.0-dev \
+        libgstreamer-plugins-base1.0-dev \
+        gstreamer1.0-plugins-base \
+        gstreamer1.0-plugins-good \
+        gstreamer1.0-plugins-bad \
+        gstreamer1.0-plugins-ugly \
+        gstreamer1.0-libav \
     && rm -rf /var/lib/apt/lists/* \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
     && echo $TZ > /etc/timezone
@@ -33,7 +43,9 @@ COPY app.py .
 COPY sofa.mp4 .
 COPY src ./src
 COPY templates ./templates
-COPY drm ./drm
+
+RUN g++ -std=c++17 -O2 $(pkg-config --cflags gstreamer-1.0 glib-2.0) src/gstreamer_engine.cpp \
+    -o /usr/local/bin/gstreamer_engine $(pkg-config --libs gstreamer-1.0 glib-2.0)
 
 RUN useradd --create-home --uid 10001 appuser \
     && mkdir -p /app/data \

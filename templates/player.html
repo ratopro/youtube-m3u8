@@ -21,6 +21,20 @@
         h3 { font-size: 15px; margin: 0 0 8px; color: #d1d5db; text-transform: uppercase; letter-spacing: 0.5px; }
 
         .header { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+        .no-emission-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            display: none; align-items: center; justify-content: center;
+            z-index: 50; pointer-events: none;
+        }
+        .no-emission-overlay.visible { display: flex; }
+        .no-emission-text { font-size: 32px; color: #6b7280; font-weight: 600; }
+        .bottom-right-clock {
+            position: fixed; bottom: 16px; right: 16px;
+            font-size: 13px; color: #9ca3af; font-family: monospace;
+            z-index: 51; pointer-events: none; display: none;
+        }
+        .bottom-right-clock.visible { display: block; }
+        .header-clock { font-size: 13px; color: #9ca3af; font-family: monospace; white-space: nowrap; }
         .header         .status-tag {
             font-size: 13px; padding: 4px 10px; border-radius: 20px; font-weight: 600;
         }
@@ -84,7 +98,7 @@
         .source-list li:hover, .cal-list li:hover { background: #111827; }
 
         .source-type { font-size: 12px; padding: 2px 6px; border-radius: 4px; font-weight: 600; }
-        .source-type.yt { background: #7c3aed; }
+        .source-type.yt, .source-type.youtube { background: #dc2626; }
         .source-type.iptv { background: #0891b2; }
         .source-type.xtream { background: #059669; }
         .source-type.hls { background: #d97706; }
@@ -416,30 +430,40 @@
     </style>
 </head>
 <body>
+<div class="no-emission-overlay" id="no-emission-overlay">
+        <span class="no-emission-text">Sin emisión</span>
+    </div>
+    <div class="bottom-right-clock" id="bottom-right-clock"></div>
+
 <main>
     <div class="header">
-        <div>
-            <h1>Parrilla TV</h1>
-            <h2>
-                Reemisor HLS Local · v{{ app_version }}
-                {% if build_commit %}<span style="color:#6b7280; font-size:12px;">({{ build_commit }}{% if build_date %} · {{ build_date }}{% endif %})</span>{% endif %}
-            </h2>
+        <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+            <div>
+                <h1 style="margin:0;">Parrilla TV</h1>
+                <h2 style="margin:4px 0 0;">
+                    Reemisor HLS Local · v{{ app_version }}
+                    {% if build_commit %}<span style="color:#6b7280; font-size:12px;">({{ build_commit }}{% if build_date %} · {{ build_date }}{% endif %})</span>{% endif %}
+                </h2>
+            </div>
+            {% if connected %}
+                <span class="status-tag playing">
+                    {% if current_reason == 'calendar' %}Programado
+                    {% elif current_reason == 'auto' %}Auto
+                    {% elif current_reason == 'manual' %}Manual
+                    {% elif current_reason == 'black' %}Negro
+                    {% else %}Emision{% endif %}
+                </span>
+            {% else %}
+                <span class="status-tag stopped">Detenido</span>
+            {% endif %}
+            {% if auto_enabled and not connected %}
+                <span class="status-tag auto">Auto activo</span>
+            {% endif %}
         </div>
-        {% if connected %}
-            <span class="status-tag playing">
-                {% if current_reason == 'calendar' %}Programado
-                {% elif current_reason == 'auto' %}Auto
-                {% elif current_reason == 'manual' %}Manual
-                {% else %}Emision{% endif %}
-            </span>
-        {% else %}
-            <span class="status-tag stopped">Detenido</span>
-        {% endif %}
-        {% if auto_enabled and not connected %}
-            <span class="status-tag auto">Auto activo</span>
-        {% endif %}
-        <a href="/sources" class="btn btn-sm" style="margin-left:auto; text-decoration:none;">Fuentes</a>
-        <span class="encoder-badge" id="encoder-badge" style="display:none; font-size:12px; padding:3px 8px; border-radius:10px; font-weight:600;"></span>
+        <div style="display:flex; align-items:center; gap:12px; margin-left:auto;">
+            <a href="/sources" class="btn btn-sm" style="text-decoration:none;">Fuentes</a>
+            <span class="encoder-badge" id="encoder-badge" style="display:none; font-size:12px; padding:3px 8px; border-radius:10px; font-weight:600;"></span>
+        </div>
     </div>
 
     {% if error %}
@@ -459,6 +483,8 @@
                                     Programado &middot; {{ source_url }}
                                 {% elif current_reason == 'auto' %}
                                     Seleccion automatica &middot; {{ source_url }}
+                                {% elif current_reason == 'black' %}
+                                    Negro + reloj
                                 {% elif mode == 'presentation' %}
                                     Video presentacion
                                 {% else %}
@@ -477,10 +503,13 @@
                         {% endif %}
                     </div>
                 </div>
-                <div class="actions" style="margin-top:12px;">
+                <div class="actions" style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                    <div class="emit-selector" id="emit-selector" style="display:flex; gap:2px; background:#1f2937; border-radius:8px; padding:3px;">
+                        <button class="emit-opt" id="emit-opt-auto" onclick="setEmitMode('auto')" style="background:#2563eb; border:none; border-radius:6px; color:#fff; cursor:pointer; font-size:12px; font-weight:600; padding:5px 10px;">Auto</button>
+                        <button class="emit-opt" id="emit-opt-black" onclick="setEmitMode('black')" style="background:transparent; border:none; border-radius:6px; color:#9ca3af; cursor:pointer; font-size:12px; font-weight:600; padding:5px 10px;">Negro</button>
+                        <button class="emit-opt" id="emit-opt-program" onclick="setEmitMode('program')" style="background:transparent; border:none; border-radius:6px; color:#9ca3af; cursor:pointer; font-size:12px; font-weight:600; padding:5px 10px;">Program</button>
+                    </div>
                     <button class="btn btn-sm btn-primary" onclick="emitNow()">Emitir ahora</button>
-                    <button class="btn btn-sm" onclick="nextAuto()" {% if not auto_enabled %}disabled{% endif %}>Siguiente Auto</button>
-                    <button class="btn btn-sm" onclick="stopEmission()" {% if not connected %}disabled{% endif %}>Detener</button>
                     <button class="btn btn-sm" id="preview-toggle-btn" onclick="togglePreview()">Preview ON</button>
                 </div>
                 <div id="pending-info" class="pending-info" {% if not pending_source %}style="display:none;"{% endif %}>
@@ -552,7 +581,7 @@
             <span class="badge">{{ calendar_today|length }} programas</span>
             <div class="actions">
                 <button class="btn btn-sm btn-primary" onclick="toggleAddForm()">+ Añadir programa</button>
-                <button class="btn btn-sm" id="sources-panel-btn" onclick="toggleSourcesPanel()">Sources</button>
+                <button class="btn btn-sm" id="sources-panel-btn" onclick="toggleSourcesPanel()">Canales</button>
                 <button class="btn btn-sm" onclick="fetchFootballMatches()">⚽ Fútbol</button>
                 <button class="btn btn-sm" onclick="refreshCalendar()">Recargar</button>
             </div>
@@ -577,6 +606,7 @@
                 <div class="sources-epg-layout">
                     <div class="sources-list-col">
                         <div style="font-size:14px; color:#9ca3af; margin-bottom:8px; font-weight:600;">Arrastra al calendario</div>
+                                <div style="font-size:12px; color:#6b7280; margin-bottom:6px;">Doble clic = cargar EPG &nbsp;|&nbsp; ✕ = eliminar</div>
                         <div style="display:flex; gap:6px; margin-bottom:8px;">
                             <input type="text" id="panel-source-search" oninput="filterPanelSources()" placeholder="Buscar canal en fuentes..." style="flex:1; background:#030712; border:1px solid #4b5563; border-radius:6px; color:#fff; font-size:14px; padding:8px 10px;">
                             <select id="panel-source-group-filter" onchange="filterPanelSources()" style="min-width:140px; background:#030712; border:1px solid #4b5563; border-radius:6px; color:#fff; font-size:13px; padding:8px 10px;">
@@ -584,7 +614,7 @@
                             </select>
                         </div>
                         {% for s in sources %}
-                        {% if s.type != 'football' and s.get('emit_enabled', True) %}
+                        {% if s.get('emit_enabled', True) %}
                         <div draggable="true" class="source-panel-item" data-source-id="{{ s.id }}"
                              data-source-name="{{ s.name|lower }}"
                              data-source-type="{{ s.type|lower }}"
@@ -640,6 +670,18 @@
                 </label>
             </div>
         </details>
+        <div class="modal-overlay" id="login-modal" style="display:none;" onclick="if(event.target===this)closeLoginModal()">
+            <div class="modal-content" style="max-width:320px; text-align:center;">
+                <h3 style="margin:0 0 16px;">Acceso restringido</h3>
+                <p style="color:#9ca3af; font-size:14px; margin:0 0 16px;">Introduce el token de administracion</p>
+                <div class="input-row" style="margin-bottom:12px;">
+                    <input type="password" id="login-token-input" placeholder="Token" style="flex:1;" onkeydown="if(event.key==='Enter')submitLogin()">
+                </div>
+                <button class="btn btn-primary" style="width:100%;" onclick="submitLogin()">Acceder</button>
+                <div id="login-error" style="color:#fca5a5; font-size:13px; margin-top:8px; display:none;"></div>
+            </div>
+        </div>
+
         <div class="modal-overlay" id="clock-modal" style="display:none;" onclick="if(event.target===this)closeClockModal()">
             <div class="modal-content">
                 <div class="clock-picker">
@@ -686,6 +728,85 @@
             </div>
         </div>
         <script>
+        function getAdminToken() {
+            var match = document.cookie.match(/(?:^|;\s*)admin_token=([^;]*)/);
+            return match ? match[1] : '';
+        }
+        function closeLoginModal() {
+            document.getElementById('login-modal').style.display = 'none';
+        }
+        function submitLogin() {
+            var token = document.getElementById('login-token-input').value;
+            var form = new FormData();
+            form.append('token', token);
+            fetch('/login', { method: 'POST', body: form })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.ok) {
+                        closeLoginModal();
+                        location.reload();
+                    } else {
+                        var err = document.getElementById('login-error');
+                        err.textContent = data.error || 'Token invalido';
+                        err.style.display = 'block';
+                    }
+                })
+                .catch(function() {
+                    var err = document.getElementById('login-error');
+                    err.textContent = 'Error de conexion';
+                    err.style.display = 'block';
+                });
+        }
+        document.addEventListener('DOMContentLoaded', function() {
+            var origFetch = window.fetch.bind(window);
+            window.fetch = function(url, opts) {
+                opts = opts || {};
+                opts.credentials = 'same-origin';
+                var t = getAdminToken();
+                if (t && !opts.headers) opts.headers = {};
+                if (t && opts.headers instanceof Headers) {
+                    opts.headers.set('X-Admin-Token', t);
+                } else if (t) {
+                    opts.headers = opts.headers || {};
+                    opts.headers['X-Admin-Token'] = t;
+                }
+                return origFetch(url, opts).catch(function(err) {
+                    throw err;
+                });
+            };
+            origFetch('/api/version', { credentials: 'same-origin' })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.auth_required && !getAdminToken()) {
+                        document.getElementById('login-modal').style.display = 'flex';
+                    }
+                })
+                .catch(function() {});
+        });
+
+        function updateBottomRightClock() {
+            var now = new Date();
+            var d = String(now.getDate()).padStart(2,'0') + '/' + String(now.getMonth()+1).padStart(2,'0') + '/' + now.getFullYear();
+            var t = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0') + ':' + String(now.getSeconds()).padStart(2,'0');
+            document.getElementById('bottom-right-clock').textContent = d + ' ' + t;
+        }
+        function updateEmissionOverlay() {
+            var connected = {{ 'true' if connected else 'false' }};
+            var currentReason = {{ current_reason | tojson }};
+            var overlay = document.getElementById('no-emission-overlay');
+            var clock = document.getElementById('bottom-right-clock');
+            if (!connected || currentReason === 'black') {
+                overlay.classList.add('visible');
+                clock.classList.add('visible');
+            } else {
+                overlay.classList.remove('visible');
+                clock.classList.remove('visible');
+            }
+        }
+        updateEmissionOverlay();
+        updateBottomRightClock();
+        setInterval(updateBottomRightClock, 1000);
+
         document.getElementById('cal-details').addEventListener('toggle', function() {
             if (this.open) {
                 filterCalendarSourceOptions();
@@ -851,6 +972,7 @@
     var processedTsPlayer = null;
     var outputPlayerReady = false;
     var previewEnabled = localStorage.getItem('previewEnabled') !== '0';
+    var outputPreviewHiddenUntil = 0;
     var logsCollapsed = true;
     var logsInterval = null;
 
@@ -875,6 +997,26 @@
         if (inputPlaceholder) {
             inputPlaceholder.style.display = previewEnabled ? 'none' : '';
         }
+        updateOutputPreviewVisibility();
+    }
+
+    function updateOutputPreviewVisibility() {
+        var panel = document.getElementById('signal-output-panel');
+        if (!panel) return;
+        var stored = parseInt(sessionStorage.getItem('outputPreviewHiddenUntil') || '0', 10);
+        outputPreviewHiddenUntil = Math.max(outputPreviewHiddenUntil, stored);
+        if (Date.now() < outputPreviewHiddenUntil) {
+            panel.style.display = 'none';
+            setTimeout(updateOutputPreviewVisibility, outputPreviewHiddenUntil - Date.now());
+            return;
+        }
+        panel.style.display = '';
+    }
+
+    function hideOutputPreview(seconds) {
+        outputPreviewHiddenUntil = Date.now() + seconds * 1000;
+        sessionStorage.setItem('outputPreviewHiddenUntil', String(outputPreviewHiddenUntil));
+        updateOutputPreviewVisibility();
     }
 
     function teardownPreviewPlayers() {
@@ -1356,28 +1498,38 @@
         var items = calendarPrograms[dateKey] || [];
         var html = '<ul id="day-programs-list" data-date="' + dateKey + '" style="list-style:none; padding-left:0; margin:8px 0 0; min-height:40px;">';
         if (!items.length) {
-            html += '<div class="empty" style="padding:8px 0; color:#6b7280; font-size:13px;">No hay programas para este dia. Arrastra una fuente aqui.</div>';
+            html += '<li class="blank-slot" style="display:grid; grid-template-columns:24px 55px 55px 1fr 1.5fr 24px 24px; gap:3px; align-items:center; padding:4px; border-bottom:1px dashed #374151; font-size:12px; color:#4b5563; min-height:32px;">'
+                + '<span></span><span style="color:#4b5563;">--:--</span><span style="color:#4b5563;">--:--</span>'
+                + '<span style="color:#6b7280; font-style:italic;">Arrastra aqui una fuente</span>'
+                + '<span></span><span></span><span></span>'
+                + '</li>';
             html += '</ul>';
             body.innerHTML = html;
             setupDayProgramsDragDrop();
             return;
         }
-        html += '<li style="display:grid; grid-template-columns:24px 55px 55px 1fr 1.5fr 24px; gap:3px; padding:4px 4px; font-size:11px; color:#9ca3af; font-weight:700; border-bottom:1px solid #374151;">'
-            + '<span></span><span>Inicio</span><span>Fin</span><span>Canal</span><span>Programa</span><span></span>'
+        html += '<li style="display:grid; grid-template-columns:24px 55px 55px 1fr 1.5fr 24px 24px; gap:3px; padding:4px 4px; font-size:11px; color:#9ca3af; font-weight:700; border-bottom:1px solid #374151;">'
+            + '<span></span><span>Inicio</span><span>Fin</span><span>Canal</span><span>Programa</span><span></span><span></span>'
             + '</li>';
         items.forEach(function(e) {
             var t = e.start_mode === 'after_previous' ? 'Despues del anterior' : (e.time || '--:--');
             var progName = e.epg_title || e.title || 'Programa';
             var endTime = e.epg_end_time || e.end_time || '';
-            html += '<li draggable="true" data-cal-id="' + e.id + '" style="display:grid; grid-template-columns:24px 55px 55px 1fr 1.5fr 24px; gap:3px; align-items:center; padding:4px; border-bottom:1px solid #1f2937; cursor:grab; font-size:12px;">'
+            html += '<li draggable="true" data-cal-id="' + e.id + '" style="display:grid; grid-template-columns:24px 55px 55px 1fr 1.5fr 24px 24px; gap:3px; align-items:center; padding:4px; border-bottom:1px solid #1f2937; cursor:grab; font-size:12px;">'
                 + '<span class="drag-handle" style="cursor:grab; color:#6b7280; user-select:none;">&#9776;</span>'
                 + '<span style="color:#6ee7b7;">' + escapeHtml(t) + '</span>'
                 + '<span>' + escapeHtml(endTime) + '</span>'
                 + '<span style="color:#93c5fd; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + escapeHtml(e.source_name || '') + '</span>'
                 + '<span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + escapeHtml(progName) + '</span>'
-                + '<button onclick="deleteCal(\'' + e.id + '\')" style="background:#7f1d1d; border:none; color:#fca5a5; border-radius:4px; padding:1px 4px; font-size:10px; cursor:pointer; line-height:1;" title="Eliminar">x</button>'
+                + '<button onclick="editCal(\'' + e.id + '\')" style="background:#2563eb; border:none; color:#bfdbfe; border-radius:4px; padding:1px 4px; font-size:11px; cursor:pointer; line-height:1; width:22px; height:22px; display:inline-flex; align-items:center; justify-content:center;" title="Editar">✏️</button>'
+                + '<button onclick="deleteCal(\'' + e.id + '\')" style="background:#7f1d1d; border:none; color:#fca5a5; border-radius:4px; padding:1px 4px; font-size:11px; cursor:pointer; line-height:1; width:22px; height:22px; display:inline-flex; align-items:center; justify-content:center;" title="Eliminar">🗑️</button>'
                 + '</li>';
         });
+        html += '<li class="blank-slot" style="display:grid; grid-template-columns:24px 55px 55px 1fr 1.5fr 24px 24px; gap:3px; align-items:center; padding:4px; border-bottom:1px dashed #374151; font-size:12px; color:#4b5563; min-height:32px;">'
+            + '<span></span><span style="color:#4b5563;">--:--</span><span style="color:#4b5563;">--:--</span>'
+            + '<span style="color:#6b7280; font-style:italic;">Arrastra aqui una fuente</span>'
+            + '<span></span><span></span>'
+            + '</li>';
         html += '</ul>';
         body.innerHTML = html;
         setupDayProgramsDragDrop();
@@ -1641,14 +1793,6 @@
             });
     }
 
-    function stopEmission() {
-        fetch('/api/stop', { method: 'POST' })
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                if (data.ok) location.reload();
-            });
-    }
-
     var editCalId = null;
 
     function editCal(id) {
@@ -1670,7 +1814,7 @@
                 document.getElementById('edit-cal-no-time').checked = noTime;
                 toggleEditNoTime();
                 document.getElementById('edit-cal-result').textContent = '';
-                document.getElementById('edit-cal-modal').style.display = 'block';
+                document.getElementById('edit-cal-modal').style.display = 'flex';
             })
             .catch(function(err) {
                 showError('Error al cargar: ' + err.message);
@@ -1851,15 +1995,54 @@
             .catch(function() { showError('Error de red'); });
     }
 
+    var selectedEmitMode = 'auto';
+
+    function setEmitMode(mode) {
+        selectedEmitMode = mode;
+        document.querySelectorAll('.emit-opt').forEach(function(btn) {
+            btn.style.background = 'transparent';
+            btn.style.color = '#9ca3af';
+        });
+        var activeBtn = document.getElementById('emit-opt-' + mode);
+        if (activeBtn) {
+            activeBtn.style.background = '#2563eb';
+            activeBtn.style.color = '#fff';
+        }
+    }
+
     function emitNow() {
-        fetch('/api/emit_now', { method: 'POST' })
+        hideOutputPreview(6);
+        if (selectedEmitMode === 'black') {
+            fetch('/api/stop', { method: 'POST' })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.ok) location.reload();
+                    else showError(data.error || 'Error al cambiar a negro');
+                })
+                .catch(function() { showError('Error de red'); });
+            return;
+        }
+        if (selectedEmitMode === 'auto') {
+            fetch('/api/auto/next', { method: 'POST' })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.ok) { showError(data.error || 'No hay fuentes auto disponibles'); return; }
+                    return fetch('/api/emit_now', { method: 'POST' });
+                })
+                .then(function(r) { return r ? r.json() : null; })
+                .then(function(data) {
+                    if (data && data.ok) location.reload();
+                    else if (data) showError(data.error || 'No se pudo iniciar emision');
+                })
+                .catch(function() { showError('Error de red'); });
+            return;
+        }
+var programDate = document.getElementById('cal-date') ? document.getElementById('cal-date').value : '';
+        fetch('/api/emit_now?mode=program' + (programDate ? '&date=' + encodeURIComponent(programDate) : ''), { method: 'POST' })
             .then(function(r) { return r.json(); })
             .then(function(data) {
-                if (data.ok) {
-                    location.reload();
-                } else {
-                    showError(data.error || 'No se pudo iniciar emision');
-                }
+                if (data.ok) location.reload();
+                else showError(data.error || 'No se pudo iniciar emision');
             })
             .catch(function() { showError('Error de red'); });
     }
@@ -2070,7 +2253,7 @@
         if (!panel) return;
         var show = panel.style.display !== 'block';
         panel.style.display = show ? 'block' : 'none';
-        document.getElementById('sources-panel-btn').textContent = show ? 'Ocultar sources' : 'Sources';
+        document.getElementById('sources-panel-btn').textContent = show ? 'Ocultar' : 'Canales';
         if (show) {
             var input = document.getElementById('panel-source-search');
             if (input) input.focus();
@@ -2208,7 +2391,7 @@
         var addBtn = document.getElementById('football-add-btn');
         list.innerHTML = '<div style="color:#9ca3af;">Cargando…</div>';
         addBtn.style.display = 'none';
-        modal.style.display = 'block';
+        modal.style.display = 'flex';
 
         fetch('/api/football/today')
             .then(function(r) { return r.json(); })
