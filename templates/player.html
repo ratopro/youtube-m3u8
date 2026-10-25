@@ -102,6 +102,7 @@
         .source-type.iptv { background: #0891b2; }
         .source-type.xtream { background: #059669; }
         .source-type.hls { background: #d97706; }
+        .source-type.file { background: #0d9488; }
         .source-type.pres { background: #6b7280; }
 
         .tag { font-size: 12px; padding: 2px 6px; border-radius: 4px; font-weight: 600; }
@@ -622,7 +623,7 @@
                              ondblclick="loadSourceEpg('{{ s.id }}')"
                              style="padding:8px 10px; margin-bottom:4px; border-radius:6px; border:1px solid #374151; cursor:grab; font-size:14px; display:flex; align-items:center; gap:8px; background:#111827; transition: background 0.15s, border-color 0.15s;">
                              <span style="color:#6b7280; font-size:14px;">☰</span>
-                             <span class="source-type {{ s.type }}" style="font-size:11px;">{{ s.type }}</span>
+                             <span class="source-type {{ s.type }}" style="font-size:11px;">{{ 'archivo' if s.type == 'file' else s.type }}</span>
                               <span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ s.name }}</span>
                               {% if s.duration_label %}
                                   <span style="color:#6ee7b7; font-size:11px;">{{ s.duration_label }}</span>
@@ -653,7 +654,7 @@
                         <option value="">-- Selecciona fuente --</option>
                         {% for s in sources %}
                         {% if s.get('emit_enabled', True) %}
-                        <option value="{{ s.id }}" data-source-name="{{ s.name|lower }}" data-source-type="{{ s.type|lower }}" data-source-group="{{ (s.group or 'Otros')|lower }}">{{ s.name }} ({{ s.type }})</option>
+                        <option value="{{ s.id }}" data-source-name="{{ s.name|lower }}" data-source-type="{{ s.type|lower }}" data-source-group="{{ (s.group or 'Otros')|lower }}">{{ s.name }} ({{ 'archivo' if s.type == 'file' else s.type }})</option>
                         {% endif %}
                         {% endfor %}
                     </select>

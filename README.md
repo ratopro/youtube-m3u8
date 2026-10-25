@@ -129,6 +129,31 @@ http://IP_DEL_HOST_DOCKER:5058/live-max.m3u8
 
 No uses `localhost` en Emby si Emby esta en otro equipo o en otro contenedor.
 
+## Archivos de video locales (MP4, MKV, AVI)
+
+Ademas de canales de YouTube, HLS e IPTV, puedes subir archivos de video propios y usarlos como una fuente mas de la parrilla.
+
+En la pagina principal, abre el panel **Archivos de video**, selecciona un archivo `.mp4`, `.mkv` o `.avi`, opcionalmente ponle un nombre y pulsa **Subir y anadir**.
+
+- El archivo se guarda en el servidor dentro de `MEDIA_DIR` (por defecto `data/media`, o `/app/data/media` en Docker) con un nombre aleatorio; el nombre original queda como metadato.
+- Al subirlo se leen duracion y codecs con `ffprobe`. Si el archivo no contiene video o esta corrupto, se rechaza.
+- La fuente aparece en **Fuentes** con el tipo `archivo` y se puede programar en la parrilla como cualquier otra.
+- La reproduccion se hace en bucle continuo. Los codecs compatibles con MPEG-TS se copian y el resto se transcodifican.
+- Al eliminar la fuente se borra tambien el archivo, siempre que este dentro de `MEDIA_DIR`.
+
+Variables de entorno relacionadas:
+
+```yaml
+environment:
+  MEDIA_DIR: "/app/data/media"
+  MAX_UPLOAD_MB: "8192"
+```
+
+- `MEDIA_DIR`: carpeta donde se almacenan los archivos subidos. Debe estar dentro del volumen persistente (`/app/data`).
+- `MAX_UPLOAD_MB`: tamano maximo permitido por archivo, en megabytes (por defecto `8192`, es decir 8 GB).
+
+> El limite real tambien depende del proxy inverso que pongas delante (por ejemplo nginx `client_max_body_size`).
+
 ## Cache de segmentos
 
 El proxy guarda segmentos de video localmente para reducir cortes cuando el reproductor repite peticiones o Emby reintenta fragmentos.

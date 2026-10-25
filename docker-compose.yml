@@ -20,6 +20,8 @@ services:
       PRESENTATION_VIDEO_ENCODER: "libx264"
       PROGRAM_HLS_DIR: "/app/data/program_hls"
       PROGRAM_FALLBACK_VIDEO: "/app/data/fallback.mp4"
+      MEDIA_DIR: "/app/data/media"
+      MAX_UPLOAD_MB: "8192"
       USE_GSTREAMER_ENGINE: "1"
       GSTREAMER_HLS_DIR: "/app/data/program_hls"
       GSTREAMER_TARGET_DURATION: "2"
