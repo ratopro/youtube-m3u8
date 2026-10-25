@@ -154,6 +154,45 @@ environment:
 
 > El limite real tambien depende del proxy inverso que pongas delante (por ejemplo nginx `client_max_body_size`).
 
+## Torrents (archivo .torrent y magnet)
+
+Tambien puedes anadir un torrent como fuente y reproducirlo **mientras se descarga**, sin esperar a que termine.
+
+En **Fuentes**, abre el panel **Torrents** y:
+
+- sube un archivo `.torrent`, o
+- pega un enlace `magnet:?xt=urn:btih:...`.
+
+Opcionalmente ponle un nombre y pulsa **Anadir torrent**. La fuente aparece con el tipo `torrent`, se puede programar en la parrilla como cualquier otra y muestra el progreso (porcentaje, velocidad y peers) en la lista de fuentes.
+
+Funcionamiento:
+
+- Se descarga en modo secuencial y se prioriza el archivo de video mas grande del torrent (`.mp4`, `.mkv`, `.avi`, `.mov`, `.m4v`, `.ts`, `.webm`, `.mpg`).
+- Las primeras y ultimas piezas se piden con deadline corto, de modo que contenedores con el indice (`moov`) al final se pueden analizar sin descargar todo.
+- La reproduccion lee el archivo por un endpoint interno con soporte `Range`: `http://127.0.0.1:5000/torrent/<source_id>/stream.<ext>`, y espera solo las piezas necesarias.
+- Al reiniciar la app se reanudan los torrents guardados (desde el `.torrent` en `TORRENT_DIR/meta` o el magnet) usando *fast resume*.
+- Al eliminar la fuente se para el torrent y se borran sus datos descargados.
+
+Variables de entorno relacionadas:
+
+```yaml
+environment:
+  TORRENT_DIR: "/app/data/torrents"
+  TORRENT_LISTEN_PORT: "6881"
+  TORRENT_PIECE_TIMEOUT: "90"
+  TORRENT_METADATA_TIMEOUT: "60"
+  INTERNAL_BASE_URL: "http://127.0.0.1:5000"
+ports:
+  - "6881:6881/tcp"
+  - "6881:6881/udp"
+```
+
+- `TORRENT_DIR`: carpeta de metadatos (`.torrent`, fast resume) y datos. Debe estar en el volumen persistente (`/app/data`).
+- `TORRENT_LISTEN_PORT`: puerto de escucha de libtorrent. Conviene mapearlo en `docker-compose.yml` (TCP y UDP) para recibir peers.
+- `TORRENT_PIECE_TIMEOUT`: segundos maximos de espera para una pieza antes de dar error.
+- `TORRENT_METADATA_TIMEOUT`: segundos maximos de espera para los metadatos de un magnet.
+- `INTERNAL_BASE_URL`: URL interna de la propia app; la usan el relay y el endpoint de streaming.
+
 ## Cache de segmentos
 
 El proxy guarda segmentos de video localmente para reducir cortes cuando el reproductor repite peticiones o Emby reintenta fragmentos.

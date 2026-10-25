@@ -54,7 +54,7 @@ RUN useradd --create-home --uid 10001 appuser \
 COPY --chown=root:root entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-EXPOSE 5000
+EXPOSE 5000 6881/tcp 6881/udp
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
     CMD curl -fsS http://127.0.0.1:5000/health >/dev/null || exit 1

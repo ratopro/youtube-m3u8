@@ -22,12 +22,19 @@ services:
       PROGRAM_FALLBACK_VIDEO: "/app/data/fallback.mp4"
       MEDIA_DIR: "/app/data/media"
       MAX_UPLOAD_MB: "8192"
+      TORRENT_DIR: "/app/data/torrents"
+      TORRENT_LISTEN_PORT: "6881"
+      TORRENT_PIECE_TIMEOUT: "90"
+      TORRENT_METADATA_TIMEOUT: "60"
+      INTERNAL_BASE_URL: "http://127.0.0.1:5000"
       USE_GSTREAMER_ENGINE: "1"
       GSTREAMER_HLS_DIR: "/app/data/program_hls"
       GSTREAMER_TARGET_DURATION: "2"
       GSTREAMER_MAX_FILES: "45"
     ports:
       - "5058:5000"
+      - "6881:6881/tcp"
+      - "6881:6881/udp"
     volumes:
       - ./data:/app/data
     restart: unless-stopped

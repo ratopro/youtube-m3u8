@@ -26,6 +26,15 @@ from flask import Flask, Response, jsonify, redirect, render_template, request, 
 log = logging.getLogger("youtube_hls.web")
 
 from src.playout import PlayoutEngine
+from src.torrent import (
+    ALLOWED_TORRENT_EXTENSIONS,
+    TorrentError,
+    TorrentManager,
+    TorrentNotReady,
+    TorrentStopped,
+    inspect_magnet,
+    inspect_torrent_data,
+)
 from src.youtube_extractor import StreamExtractor
 
 
@@ -53,18 +62,55 @@ def format_duration_label(seconds: float | int | None) -> str:
     return f"{minutes:02d}:{secs:02d}"
 
 
+def parse_byte_range(header_value: str | None, size: int) -> tuple[int, int] | None:
+    """Parse a single HTTP Range header. Return (start, end) or None if absent."""
+    if not header_value:
+        return None
+    match = re.match(r"^\s*bytes\s*=\s*(\d*)-(\d*)\s*$", header_value)
+    if not match:
+        raise ValueError("Rango no soportado")
+    start_text, end_text = match.groups()
+    if not start_text and not end_text:
+        raise ValueError("Rango vacío")
+    if start_text:
+        start = int(start_text)
+        end = int(end_text) if end_text else size - 1
+    else:
+        suffix = int(end_text)
+        if suffix <= 0:
+            raise ValueError("Rango vacío")
+        start = max(0, size - suffix)
+        end = size - 1
+    if size <= 0 or start < 0 or start >= size or end < start:
+        raise ValueError("Rango fuera del archivo")
+    return start, min(end, size - 1)
+
+
 def probe_video_file(path: Path) -> dict:
     """Read duration/codecs from a local video file using ffprobe."""
+    return probe_video_target(str(path), timeout=30)
+
+
+def probe_video_url(url: str, timeout: int = 120) -> dict:
+    """Read duration/codecs from an HTTP media URL using ffprobe."""
+    return probe_video_target(url, timeout=timeout, rw_timeout_us=timeout * 1_000_000)
+
+
+def probe_video_target(target: str, timeout: int = 30, rw_timeout_us: int | None = None) -> dict:
+    """Run ffprobe on a local file or URL and normalise the metadata."""
+    cmd = ["ffprobe", "-v", "error"]
+    if rw_timeout_us:
+        cmd.extend(["-rw_timeout", str(rw_timeout_us)])
+    cmd.extend([
+        "-print_format", "json",
+        "-show_format", "-show_streams",
+        target,
+    ])
     result = subprocess.run(
-        [
-            "ffprobe", "-v", "error",
-            "-print_format", "json",
-            "-show_format", "-show_streams",
-            str(path),
-        ],
+        cmd,
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=timeout,
     )
     if result.returncode != 0:
         detail = (result.stderr or "").strip().splitlines()
@@ -106,6 +152,7 @@ def probe_video_file(path: Path) -> dict:
         "audio_codec": ((audio or {}).get("codec_name") or "").lower() or None,
         "width": video.get("width"),
         "height": video.get("height"),
+        "audio_probed": True,
     }
 
 
@@ -433,6 +480,8 @@ def _source_group_for(src: dict) -> str:
         return "Futbol"
     if src_type == "file":
         return "Archivos"
+    if src_type == "torrent":
+        return "Torrents"
     return "Otros"
 
 
@@ -759,6 +808,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
     SENSITIVE_GET_PATHS = {
         "/api/logs",
         "/api/sources",
+        "/api/torrents/status",
         "/api/playout/status",
         "/api/history",
         "/api/iptv/providers",
@@ -836,6 +886,11 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
 
     presentation_video = Path(__file__).resolve().parent.parent / "sofa.mp4"
     media_dir = Path(os.environ.get("MEDIA_DIR", "data/media"))
+    torrent_dir = Path(os.environ.get("TORRENT_DIR", "data/torrents"))
+    torrent_listen_port = int(os.environ.get("TORRENT_LISTEN_PORT", "6881"))
+    torrent_piece_timeout = float(os.environ.get("TORRENT_PIECE_TIMEOUT", "90"))
+    torrent_metadata_timeout = float(os.environ.get("TORRENT_METADATA_TIMEOUT", "60"))
+    internal_base_url = os.environ.get("INTERNAL_BASE_URL", "http://127.0.0.1:5000").rstrip("/")
     presentation_hls_dir = Path(os.environ.get("PRESENTATION_HLS_DIR", "/tmp/presentation-hls"))
     preview_hls_dir = Path(os.environ.get("PREVIEW_HLS_DIR", "/tmp/preview-hls"))
     processed_hls_dir = Path(os.environ.get("PROCESSED_HLS_DIR", "/tmp/processed-hls"))
@@ -885,6 +940,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
     nvenc_available = None
     program_lock = threading.RLock()
     file_pump_lock = threading.RLock()
+    fallback_pump_lock = threading.RLock()
     stream_state = {
         "mode": "youtube" if upstream_hls_url else None,
         "source_url": None,
@@ -1143,20 +1199,22 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         return proc
 
     def _kill_fallback_pump() -> None:
-        old = stream_state.get("_fallback_pump")
-        if old and old.poll() is None:
-            old.kill()
-            try:
-                old.wait(timeout=5)
-            except Exception:
-                pass
-        stream_state["_fallback_pump"] = None
+        with fallback_pump_lock:
+            old = stream_state.get("_fallback_pump")
+            if old and old.poll() is None:
+                old.kill()
+                try:
+                    old.wait(timeout=5)
+                except Exception:
+                    pass
+            stream_state["_fallback_pump"] = None
 
     def _ensure_fallback_pump() -> None:
-        pump = stream_state.get("_fallback_pump")
-        if pump and pump.poll() is None:
-            return
-        _start_fallback_pump()
+        with fallback_pump_lock:
+            pump = stream_state.get("_fallback_pump")
+            if pump and pump.poll() is None:
+                return
+            _start_fallback_pump()
 
     def _kill_file_pump() -> None:
         with file_pump_lock:
@@ -1170,8 +1228,17 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             stream_state["_file_pump"] = None
             stream_state["_file_pump_key"] = None
 
-    def _ensure_file_pump(path: str, config: dict | None = None, version: int | None = None) -> subprocess.Popen | None:
-        """Start (or reuse) an ffmpeg pump that loops a local video file as MPEG-TS."""
+    def _ensure_file_pump(
+        path: str,
+        config: dict | None = None,
+        version: int | None = None,
+        remote: bool = False,
+    ) -> subprocess.Popen | None:
+        """Start (or reuse) an ffmpeg pump that loops a video source as MPEG-TS.
+
+        ``remote`` sources (torrents) are HTTP URLs and cannot be probed with
+        ffprobe here; their metadata comes from the source configuration.
+        """
         config = config or {}
         with file_pump_lock:
             # A switch may have happened while this generator was being
@@ -1180,7 +1247,14 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
                 return None
             video_codec = config.get("video_codec")
             audio_codec = config.get("audio_codec")
-            key = f"{path}|{video_codec or ''}|{audio_codec or ''}"
+            if remote:
+                probed = bool(config.get("audio_probed"))
+                if not probed:
+                    video_codec = "unknown"
+                    audio_codec = ""
+                elif video_codec is None:
+                    video_codec = "unknown"
+            key = f"{path}|{video_codec or ''}|{audio_codec if audio_codec is not None else 'silent'}"
             pump = stream_state.get("_file_pump")
             if pump and pump.poll() is None and stream_state.get("_file_pump_key") == key:
                 return pump
@@ -1191,18 +1265,24 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
                 return None
 
             _kill_file_pump()
-            media_path = Path(path)
-            if not media_path.is_file():
-                stream_state["program_source_error"] = f"Archivo no encontrado: {media_path}"
-                return None
-            if not video_codec or audio_codec is None:
-                try:
-                    meta = probe_video_file(media_path)
-                    video_codec = video_codec or meta.get("video_codec")
-                    audio_codec = audio_codec or meta.get("audio_codec")
-                except Exception as exc:
-                    stream_state["program_source_error"] = f"No se pudo leer el archivo: {exc}"
+            if remote:
+                if not path:
+                    stream_state["program_source_error"] = "Fuente remota sin URL"
                     return None
+                media_path = path
+            else:
+                media_path = Path(path)
+                if not media_path.is_file():
+                    stream_state["program_source_error"] = f"Archivo no encontrado: {media_path}"
+                    return None
+                if not video_codec or audio_codec is None:
+                    try:
+                        meta = probe_video_file(media_path)
+                        video_codec = video_codec or meta.get("video_codec")
+                        audio_codec = audio_codec or meta.get("audio_codec")
+                    except Exception as exc:
+                        stream_state["program_source_error"] = f"No se pudo leer el archivo: {exc}"
+                        return None
             cmd = build_file_pump_command(media_path, video_codec, audio_codec)
             try:
                 proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
@@ -1219,6 +1299,64 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             return
         pump = _ensure_file_pump(path, config, version)
         if not pump or not pump.stdout or pump.poll() is not None:
+            return
+        try:
+            while stream_state["relay_source_version"] == version:
+                ready, _, _ = select.select([pump.stdout], [], [], 0.5)
+                if not ready:
+                    continue
+                chunk = pump.stdout.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            with file_pump_lock:
+                if stream_state["relay_source_version"] != version and stream_state.get("_file_pump") is pump:
+                    _kill_file_pump()
+
+    def _torrent_chunks(version: int, source_id: str, config: dict | None = None):
+        """Relay a torrent through an ffmpeg pump so the output is loopable MPEG-TS."""
+        if stream_state["relay_source_version"] != version:
+            return
+        config = config or {}
+        try:
+            size = torrent_manager.stream_size(source_id, timeout=min(15.0, torrent_metadata_timeout))
+        except TorrentError as exc:
+            stream_state["program_source_error"] = f"Torrent no disponible: {exc}"
+            yield from _fallback_chunks(version)
+            return
+        if size <= 0:
+            stream_state["program_source_error"] = "El torrent no tiene un archivo de video válido"
+            yield from _fallback_chunks(version)
+            return
+        stream_url = config.get("_hls_url") or config.get("stream_url") or _torrent_stream_url(
+            source_id, config.get("extension")
+        )
+        if not config.get("audio_probed"):
+            # The background probe reads codecs from the HTTP stream; wait a
+            # little so the pump can copy instead of transcoding blind.
+            deadline = time.time() + 8
+            source = playout.find_source_by_id(source_id)
+            while (
+                source is not None
+                and not source.get("audio_probed")
+                and time.time() < deadline
+                and stream_state["relay_source_version"] == version
+            ):
+                time.sleep(0.25)
+                source = playout.find_source_by_id(source_id)
+            if source is not None and source.get("audio_probed"):
+                config = {
+                    **config,
+                    "video_codec": source.get("video_codec"),
+                    "audio_codec": source.get("audio_codec"),
+                    "audio_probed": True,
+                }
+        _kill_fallback_pump()
+        pump = _ensure_file_pump(stream_url, config, version, remote=True)
+        if not pump or not pump.stdout or pump.poll() is not None:
+            if stream_state["relay_source_version"] == version:
+                yield from _fallback_chunks(version, max_seconds=3)
             return
         try:
             while stream_state["relay_source_version"] == version:
@@ -1255,6 +1393,13 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             return cached_hls
         if source_type == "file":
             return config.get("path") or config.get("url") or None
+        if source_type == "torrent":
+            stream_url = config.get("stream_url")
+            if stream_url:
+                return stream_url
+            if source_id:
+                return _torrent_stream_url(source_id, config.get("extension"))
+            return None
         if source_type in ("iptv", "hls") and source_id and playout:
             s = playout.find_source_by_id(source_id)
             if s:
@@ -1367,7 +1512,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         with program_lock:
             if stream_state.get("program_source_run_id") != run_id:
                 return
-            if stream_state.get("mode") not in ("youtube", "iptv", "hls", "file"):
+            if stream_state.get("mode") not in ("youtube", "iptv", "hls", "file", "torrent"):
                 return
             stream_state["program_source_proc"] = None
             stream_state["program_source_url"] = None
@@ -1516,15 +1661,21 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         if not hls_url:
             return
         current_source = playout.find_source_by_id(stream_state.get("current_source_id") or "")
+        current_type = (current_source or {}).get("type")
         silent_audio = bool(
-            stream_state.get("mode") == "file"
-            and current_source
-            and current_source.get("type") == "file"
-            and not current_source.get("audio_codec")
+            current_source
+            and (
+                (current_type == "file" and not current_source.get("audio_codec"))
+                or (
+                    current_type == "torrent"
+                    and current_source.get("audio_probed")
+                    and not current_source.get("audio_codec")
+                )
+            )
         )
         if _start_gstreamer_source_stream(
             hls_url,
-            loop=stream_state.get("mode") == "file",
+            loop=stream_state.get("mode") in ("file", "torrent"),
             silent_audio=silent_audio,
         ):
             stream_state["_using_source_new"] = True
@@ -1547,7 +1698,9 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
 
     def _fallback_chunks(version: int, max_seconds: float | None = None):
         deadline = None if max_seconds is None else time.time() + max_seconds
-        while True:
+        while stream_state["relay_source_version"] == version and (
+            deadline is None or time.time() < deadline
+        ):
             pump = stream_state.get("_fallback_pump")
             if not pump or pump.poll() is not None or not pump.stdout:
                 _ensure_fallback_pump()
@@ -1580,6 +1733,15 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
                             _ensure_fallback_pump()
                             yield from _fallback_chunks(version)
                         continue
+                    if config.get("type") == "torrent":
+                        source_id = config.get("id")
+                        if source_id:
+                            yield from _torrent_chunks(version, source_id, config)
+                        else:
+                            stream_state["program_source_error"] = "Fuente torrent sin identificador"
+                            _ensure_fallback_pump()
+                            yield from _fallback_chunks(version)
+                        continue
                     hls_url = _resolve_relay_hls(config)
                     if hls_url:
                         try:
@@ -1603,7 +1765,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
                                 if cur_version != version:
                                     new_config = stream_state.get("relay_source_config")
                                     if new_config is not None:
-                                        if new_config.get("type") == "file":
+                                        if new_config.get("type") in ("file", "torrent"):
                                             break
                                         hls_url = _resolve_relay_hls(new_config)
                                         if hls_url:
@@ -1676,7 +1838,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
                        "box=1:boxcolor=black@0.5:boxborderw=12:bordercolor=black:borderw=2")
         include_clock = stream_state.get("include_clock", False)
         vf_arg = ["-vf", clock_filter] if include_clock else []
-        relay_url = "http://localhost:5000/_relay/feed"
+        relay_url = f"{internal_base_url}/_relay/feed"
         cmd = [
             "ffmpeg",
             "-hide_banner",
@@ -1806,7 +1968,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
 
         try:
             stop_preview_stream()
-            if stream_state.get("mode") == "file":
+            if stream_state.get("mode") in ("file", "torrent"):
                 _set_relay_source(None)
             if use_gstreamer_engine and gstreamer_engine is not None:
                 _stop_gstreamer_source_stream()
@@ -1837,7 +1999,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             return False
         try:
             stop_preview_stream()
-            if stream_state.get("mode") == "file":
+            if stream_state.get("mode") in ("file", "torrent"):
                 _set_relay_source(None)
             if use_gstreamer_engine and gstreamer_engine is not None:
                 _stop_gstreamer_source_stream()
@@ -1864,11 +2026,14 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             return False
 
     def refresh_stream_url_if_needed() -> bool:
+        current_mode = stream_state.get("mode", "")
+        if current_mode == "torrent":
+            return bool(stream_state.get("upstream_hls_url"))
+
         source_url = stream_state.get("source_url")
         if not source_url:
             return False
 
-        current_mode = stream_state.get("mode", "")
         if current_mode in ("iptv", "hls", "file") or is_direct_stream_url(source_url):
             stream_state["upstream_hls_url"] = source_url
             stream_state["stream_id"] += 1
@@ -1896,8 +2061,70 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
     def emby_stream_url(max_quality: bool = False) -> str:
         return absolute_url("/emby/live-max.m3u8" if max_quality else "/emby/live.m3u8")
 
+    def _torrent_media_response(source_id: str | None):
+        if not source_id:
+            return no_store(Response("No hay ningun torrent activo.\n", status=404))
+        source = playout.find_source_by_id(source_id)
+        if not source or source.get("type") != "torrent":
+            return no_store(Response("Fuente torrent no encontrada.\n", status=404))
+        if torrent_manager.get(source_id) is None:
+            _ensure_torrent_entry(source)
+        try:
+            size = torrent_manager.stream_size(source_id, timeout=torrent_metadata_timeout)
+        except TorrentError as exc:
+            return no_store(Response(f"Torrent no disponible: {exc}\n", status=503))
+        if size <= 0:
+            return no_store(Response("El torrent no tiene video disponible.\n", status=503))
+
+        try:
+            byte_range = parse_byte_range(request.headers.get("Range"), size)
+        except ValueError:
+            return no_store(Response(
+                "Rango no válido.\n",
+                status=416,
+                headers={"Content-Range": f"bytes */{size}"},
+            ))
+
+        if byte_range is None:
+            start, end, status_code = 0, size - 1, 200
+        else:
+            start, end = byte_range
+            status_code = 206
+        length = end - start + 1
+
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(length),
+        }
+        if status_code == 206:
+            headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+        mimetype = (
+            mimetypes.guess_type(f"stream{source.get('extension') or '.mp4'}")[0]
+            or "application/octet-stream"
+        )
+        if request.method == "HEAD":
+            return no_store(Response(b"", status=status_code, headers=headers, mimetype=mimetype))
+
+        def generate():
+            try:
+                yield from torrent_manager.iter_stream(source_id, start, length)
+            except TorrentStopped:
+                return
+            except Exception as exc:
+                log.warning("Torrent stream %s interrumpido: %s", source_id, exc)
+                return
+
+        return no_store(Response(
+            generate(),
+            status=status_code,
+            headers=headers,
+            mimetype=mimetype,
+        ))
+
     def current_media_response(default_mimetype: str = "video/mp4"):
         upstream_hls_url = stream_state["upstream_hls_url"]
+        if stream_state["mode"] == "torrent":
+            return _torrent_media_response(stream_state.get("current_source_id"))
         if stream_state["mode"] == "file":
             media_path = Path(upstream_hls_url or "")
             if media_path.is_file():
@@ -1967,6 +2194,100 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         return [ch for ch in channels if ch["url"]]
 
     playout = PlayoutEngine(state_file=os.environ.get("STATE_FILE", "data/state.json"))
+
+    torrent_probe_lock = threading.Lock()
+    torrent_probe_pending: set[str] = set()
+
+    def _torrent_stream_url(source_id: str, extension: str | None) -> str:
+        ext = (extension or ".mp4").lower()
+        if not ext.startswith("."):
+            ext = f".{ext}"
+        return f"{internal_base_url}/torrent/{source_id}/stream{ext}"
+
+    def _mark_torrent_probe(source_id: str) -> None:
+        with torrent_probe_lock:
+            torrent_probe_pending.add(source_id)
+
+    def _consume_torrent_probe(source_id: str) -> bool:
+        with torrent_probe_lock:
+            if source_id not in torrent_probe_pending:
+                return False
+            torrent_probe_pending.discard(source_id)
+            return True
+
+    def _probe_torrent_metadata(source_id: str) -> dict | None:
+        source = playout.find_source_by_id(source_id)
+        if not source:
+            return None
+        stream_url = source.get("stream_url") or _torrent_stream_url(
+            source_id, source.get("extension") or ".mp4"
+        )
+        try:
+            meta = probe_video_url(stream_url, timeout=max(60, int(torrent_piece_timeout) + 30))
+        except Exception as exc:
+            log.warning("No se pudo analizar el video del torrent %s: %s", source_id, exc)
+            playout.set_source_validation(source_id, "error", str(exc))
+            return None
+        playout.update_source(source_id, meta)
+        playout.set_source_validation(source_id, "ok", None)
+        return meta
+
+    def _on_torrent_ready(source_id: str, desc: dict) -> None:
+        source = playout.find_source_by_id(source_id)
+        if not source:
+            return
+        extension = desc.get("extension") or ".mp4"
+        updates = {
+            "torrent_file": str(torrent_manager.meta_path(source_id)),
+            "save_path": str(torrent_manager.data_path(source_id)),
+            "file_path": desc.get("file"),
+            "size_bytes": desc.get("size_bytes"),
+            "extension": extension,
+            "stream_url": _torrent_stream_url(source_id, extension),
+        }
+        current_name = (source.get("name") or "").strip()
+        if desc.get("name") and (not current_name or current_name.lower() == "torrent"):
+            updates["name"] = desc["name"]
+        playout.update_source(source_id, updates)
+        playout.set_source_validation(source_id, "ok", None)
+        if _consume_torrent_probe(source_id):
+            threading.Thread(
+                target=_probe_torrent_metadata,
+                args=(source_id,),
+                daemon=True,
+            ).start()
+
+    def _on_torrent_error(source_id: str, message: str) -> None:
+        log.warning("Torrent %s: %s", source_id, message)
+        playout.set_source_validation(source_id, "error", message)
+
+    def _ensure_torrent_entry(source: dict):
+        source_id = source.get("id")
+        if not source_id:
+            return None
+        entry = torrent_manager.get(source_id)
+        if entry is not None:
+            return entry
+        torrent_path = source.get("torrent_file") or str(torrent_manager.meta_path(source_id))
+        try:
+            if torrent_path and Path(torrent_path).is_file():
+                torrent_manager.add_torrent_data(
+                    source_id, Path(torrent_path).read_bytes(), source.get("name")
+                )
+            elif source.get("magnet"):
+                torrent_manager.add_magnet(source_id, source["magnet"], source.get("name"))
+        except Exception as exc:
+            log.warning("No se pudo cargar el torrent %s: %s", source_id, exc)
+        return torrent_manager.get(source_id)
+
+    torrent_manager = TorrentManager(
+        torrent_dir,
+        on_ready=_on_torrent_ready,
+        on_error=_on_torrent_error,
+        listen_port=torrent_listen_port,
+        piece_timeout=torrent_piece_timeout,
+        metadata_timeout=torrent_metadata_timeout,
+    )
 
     def _warm_provider_epg(provider_id: str) -> None:
         try:
@@ -2081,11 +2402,35 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         segment_cache.clear()
 
         source_type = source.get("type", "youtube")
-        if source_type == "file":
-            url = source.get("path") or source.get("url") or ""
+        if source_type == "torrent":
+            if _ensure_torrent_entry(source) is None:
+                _stop_gstreamer_source_stream()
+                if use_gstreamer_engine and gstreamer_engine is not None:
+                    gstreamer_engine.switch("black.m3u8")
+                    stream_state["program_fallback"] = True
+                error_msg = f"No se pudo cargar el torrent: {source.get('name', source_id)}"
+                stream_state["error"] = error_msg
+                playout.add_history_entry({
+                    "timestamp": now_iso(),
+                    "source_id": source_id,
+                    "source_name": source.get("name", source_id),
+                    "source_type": source_type,
+                    "reason": reason,
+                    "calendar_id": calendar_id,
+                    "success": False,
+                    "error": error_msg,
+                })
+                return False
+            url = source.get("magnet") or source.get("torrent_file") or source.get("name", "")
+            hls_url = source.get("stream_url") or _torrent_stream_url(
+                source_id, source.get("extension")
+            )
         else:
-            _check_and_refresh_source_url(source)
-            url = source.get("url", "")
+            if source_type == "file":
+                url = source.get("path") or source.get("url") or ""
+            else:
+                _check_and_refresh_source_url(source)
+                url = source.get("url", "")
         if source_type == "file" and (not url or not Path(url).is_file()):
             _stop_gstreamer_source_stream()
             if use_gstreamer_engine and gstreamer_engine is not None:
@@ -2104,7 +2449,8 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
                 "error": error_msg,
             })
             return False
-        hls_url = _hls_url_for_source(url, source_type)
+        if source_type != "torrent":
+            hls_url = _hls_url_for_source(url, source_type)
         if not hls_url:
             _stop_gstreamer_source_stream()
             if use_gstreamer_engine and gstreamer_engine is not None:
@@ -2126,7 +2472,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             return False
 
         stream_state["stream_id"] += 1
-        stream_state["mode"] = source_type if source_type in ("youtube", "iptv", "hls", "file") else "youtube"
+        stream_state["mode"] = source_type if source_type in ("youtube", "iptv", "hls", "file", "torrent") else "youtube"
         stream_state["source_url"] = url
         stream_state["source_url_name"] = source.get("name", url)
         stream_state["upstream_hls_url"] = hls_url
@@ -2141,11 +2487,25 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         if hls_url:
             try:
                 _set_relay_source(source, hls_url=hls_url)
+                if source_type == "torrent" and not source.get("audio_probed"):
+                    threading.Thread(
+                        target=_probe_torrent_metadata,
+                        args=(source_id,),
+                        daemon=True,
+                    ).start()
                 if use_gstreamer_engine and gstreamer_engine is not None:
+                    silent_audio = bool(
+                        (source_type == "file" and not source.get("audio_codec"))
+                        or (
+                            source_type == "torrent"
+                            and source.get("audio_probed")
+                            and not source.get("audio_codec")
+                        )
+                    )
                     if not _start_gstreamer_source_stream(
                         hls_url,
-                        loop=(source_type == "file"),
-                        silent_audio=(source_type == "file" and not source.get("audio_codec")),
+                        loop=(source_type in ("file", "torrent")),
+                        silent_audio=silent_audio,
                     ):
                         stream_state["program_fallback"] = True
                         if gstreamer_engine is not None and gstreamer_engine.proc and gstreamer_engine.proc.poll() is None:
@@ -2169,7 +2529,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
                     gstreamer_engine.switch("black.m3u8")
                 stream_state["program_fallback"] = True
                 return False
-        if hls_url and source_type != "file" and not StreamExtractor.is_hls_url(hls_url):
+        if hls_url and source_type not in ("file", "torrent") and not StreamExtractor.is_hls_url(hls_url):
             try:
                 start_preview_stream(hls_url)
             except Exception:
@@ -2195,6 +2555,13 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         return stream_state
 
     playout.ensure_presentation_source(presentation_video.exists())
+
+    try:
+        resumed = torrent_manager.resume(playout.get_sources())
+        if resumed:
+            log.info("Reanudados %s torrent(s) desde el estado guardado", resumed)
+    except Exception:
+        log.exception("No se pudieron reanudar los torrents guardados")
 
     playout.set_callbacks({
         "activate_source": activate_source,
@@ -2336,7 +2703,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         current_mode = stream_state["mode"]
         upstream_url = stream_state.get("upstream_hls_url")
         upstream_is_hls = bool(upstream_url and StreamExtractor.is_hls_url(upstream_url))
-        upstream_is_direct = bool(upstream_url and not upstream_is_hls and current_mode != "file")
+        upstream_is_direct = bool(upstream_url and not upstream_is_hls and current_mode not in ("file", "torrent"))
         emby_preview_url = "/emby/processed/live.m3u8" if processed_enabled else "/emby/live.m3u8"
         playback_url = None
         is_hls_flag = False
@@ -3128,6 +3495,10 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             mimetype="application/vnd.apple.mpegurl",
         ))
 
+    @app.route("/torrent/<source_id>/stream.<ext>", methods=["GET", "HEAD"])
+    def torrent_stream(source_id: str, ext: str):
+        return _torrent_media_response(source_id)
+
     @app.route("/current/media.mp4")
     def current_media_mp4():
         return current_media_response("video/mp4")
@@ -3226,6 +3597,14 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         for item in items:
             item.setdefault("group", _source_group_for(item))
         return jsonify(items)
+
+    @app.route("/api/torrents/status", methods=["GET"])
+    def api_torrents_status():
+        torrents = [
+            item for item in torrent_manager.statuses()
+            if playout.find_source_by_id(item.get("id", "")) is not None
+        ]
+        return jsonify({"ok": True, "torrents": torrents})
 
     @app.route("/api/sources/add_youtube", methods=["POST"])
     def api_add_youtube():
@@ -3340,8 +3719,96 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             "size_bytes": stored_path.stat().st_size,
         })
 
+    @app.route("/api/sources/add_torrent", methods=["POST"])
+    def api_add_torrent():
+        name = request.form.get("name", "").strip()
+        magnet = request.form.get("magnet", "").strip()
+        upload = request.files.get("file")
+        trying_file = bool(upload and upload.filename)
+
+        if trying_file:
+            original_filename = os.path.basename(upload.filename.replace("\\", "/"))
+            extension = Path(original_filename).suffix.lower()
+            if extension not in ALLOWED_TORRENT_EXTENSIONS:
+                return jsonify({
+                    "ok": False,
+                    "error": "Formato no permitido. Usa un archivo .torrent",
+                }), 400
+            try:
+                data = upload.read()
+                meta = inspect_torrent_data(data)
+            except TorrentError as exc:
+                return jsonify({"ok": False, "error": str(exc)}), 400
+            display_name = name or meta.get("name") or Path(original_filename).stem
+            source = {
+                "name": display_name,
+                "type": "torrent",
+                "url": "",
+                "original_filename": original_filename,
+                "size_bytes": meta.get("total_size"),
+                "emit_enabled": True,
+            }
+            src_id = playout.add_source(source)
+            _mark_torrent_probe(src_id)
+            try:
+                desc = torrent_manager.add_torrent_data(src_id, data, display_name)
+            except TorrentError as exc:
+                _consume_torrent_probe(src_id)
+                torrent_manager.remove(src_id, delete_files=True)
+                playout.delete_source(src_id)
+                return jsonify({"ok": False, "error": str(exc)}), 400
+            return jsonify({
+                "ok": True,
+                "source_id": src_id,
+                "name": display_name,
+                "metadata_ready": bool(desc.get("metadata")),
+                "size_bytes": desc.get("size_bytes"),
+                "duration_label": None,
+            })
+
+        if magnet:
+            try:
+                meta = inspect_magnet(magnet)
+            except TorrentError as exc:
+                return jsonify({"ok": False, "error": str(exc)}), 400
+            display_name = name or meta.get("name") or "Torrent"
+            source = {
+                "name": display_name,
+                "type": "torrent",
+                "url": magnet,
+                "magnet": magnet,
+                "emit_enabled": True,
+            }
+            src_id = playout.add_source(source)
+            _mark_torrent_probe(src_id)
+            try:
+                desc = torrent_manager.add_magnet(src_id, magnet, display_name)
+            except TorrentError as exc:
+                _consume_torrent_probe(src_id)
+                torrent_manager.remove(src_id, delete_files=True)
+                playout.delete_source(src_id)
+                return jsonify({"ok": False, "error": str(exc)}), 400
+            return jsonify({
+                "ok": True,
+                "source_id": src_id,
+                "name": display_name,
+                "metadata_ready": bool(desc.get("metadata")),
+                "size_bytes": desc.get("size_bytes"),
+                "duration_label": None,
+            })
+
+        return jsonify({
+            "ok": False,
+            "error": "Selecciona un archivo .torrent o pega un enlace magnet",
+        }), 400
+
     def _remove_source_media_file(source: dict | None) -> None:
-        if not source or source.get("type") != "file":
+        if not source:
+            return
+        if source.get("type") == "torrent":
+            torrent_manager.remove(source.get("id", ""), delete_files=True)
+            return
+        if source.get("type") != "file":
             return
         raw_path = source.get("path") or source.get("url") or ""
         if not raw_path:
@@ -3405,8 +3872,13 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         if not source_id:
             return jsonify({"ok": False, "error": "source_id requerido"})
         source = playout.find_source_by_id(source_id)
+        was_current = bool(source and stream_state.get("current_source_id") == source_id)
         ok = playout.delete_source(source_id)
         if ok:
+            if was_current and source and source.get("type") == "torrent":
+                _set_relay_source(None)
+                _stop_gstreamer_source_stream()
+                force_presentation("fuente torrent eliminada")
             _remove_source_media_file(source)
         return jsonify({"ok": ok})
 
@@ -3931,7 +4403,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
 
         try:
             source_type = source.get("type", "youtube")
-            if source_type != "file":
+            if source_type not in ("file", "torrent"):
                 url = source["url"]
                 hls_url = _hls_url_for_source(url, source_type)
                 if hls_url:
@@ -4010,12 +4482,25 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
             return jsonify({"ok": False, "error": "Fuente no encontrada"})
 
         source_type = source.get("type", "youtube")
-        url = source["url"]
+        url = source.get("url", "")
         status = "ok"
         error_msg = None
 
         try:
-            if source_type == "file":
+            if source_type == "torrent":
+                if torrent_manager.get(source_id) is None:
+                    _ensure_torrent_entry(source)
+                desc = torrent_manager.descriptor(source_id)
+                if desc is None:
+                    raise ValueError("Torrent no cargado")
+                if desc.get("error"):
+                    raise ValueError(desc["error"])
+                if not desc.get("metadata"):
+                    status = "pending"
+                    error_msg = "Esperando metadatos y peers del torrent"
+                elif not desc.get("ready"):
+                    raise ValueError("Todavía no hay un archivo de vídeo disponible")
+            elif source_type == "file":
                 media_path = Path(source.get("path") or url or "")
                 if not media_path.is_file():
                     raise ValueError("Archivo de video no encontrado")
@@ -4085,7 +4570,18 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
         error_msg = None
 
         try:
-            if source["type"] == "file":
+            if source.get("type") == "torrent":
+                if torrent_manager.get(source_id) is None:
+                    _ensure_torrent_entry(source)
+                if torrent_manager.get(source_id) is None:
+                    raise ValueError("Torrent no cargado")
+                # Fail fast if metadata still is not available.
+                torrent_manager.stream_size(source_id, timeout=min(15.0, torrent_metadata_timeout))
+                meta = _probe_torrent_metadata(source_id)
+                if meta is None:
+                    raise ValueError("No se pudo analizar el video del torrent")
+                updates.update(meta)
+            elif source["type"] == "file":
                 media_path = Path(source.get("path") or source.get("url") or "")
                 if not media_path.is_file():
                     raise ValueError("Archivo de video no encontrado")
@@ -4095,7 +4591,7 @@ def create_app(hls_dir: str = "output/hls", upstream_hls_url: str | None = None)
                 updates["duration_seconds"] = md["duration_seconds"]
                 updates["duration_label"] = md["duration_label"]
                 updates["is_live"] = md["is_live"]
-            elif source["type"] in ("hls", "iptv") or ".m3u8" in source["url"]:
+            elif source["type"] in ("hls", "iptv") or ".m3u8" in source.get("url", ""):
                 meta = probe_hls(source["url"])
                 updates.update(meta)
             elif source["type"] == "presentation":

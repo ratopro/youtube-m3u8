@@ -1,4 +1,5 @@
 yt-dlp
 flask
 requests
+libtorrent==2.1.1
 curl_cffi>=0.14,<0.15

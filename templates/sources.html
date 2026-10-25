@@ -136,6 +136,12 @@
         .source-type.xtream { background: #059669; }
         .source-type.presentation { background: #6b7280; }
         .source-type.file { background: #0d9488; }
+        .source-type.torrent { background: #15803d; }
+        .torrent-meta { display: block; font-size: 11px; color: #6ee7b7; margin-top: 2px; }
+        .torrent-meta.error { color: #fca5a5; }
+        .torrent-meta.pending { color: #93c5fd; }
+        .torrent-bar { height: 4px; background: #1f2937; border-radius: 2px; overflow: hidden; margin-top: 3px; max-width: 220px; }
+        .torrent-bar > div { height: 100%; background: #22c55e; transition: width 0.3s; }
 
         .tag { font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: 600; white-space: nowrap; }
         .tag.auto-yes { background: #166534; color: #86efac; }
@@ -290,6 +296,35 @@
                     </div>
                 </div>
             </div>
+
+            <div class="card collapsible collapsed" id="panel-torrent">
+                <div class="panel-header" onclick="togglePanel('panel-torrent')">
+                    <h3>Torrents</h3>
+                    <span class="panel-toggle">▼</span>
+                </div>
+                <div class="panel-body">
+                    <div class="input-row">
+                        <input type="text" id="torrent-name" placeholder="Nombre (opcional)">
+                    </div>
+                    <div class="input-row">
+                        <input type="file" id="torrent-file" accept=".torrent,application/x-bittorrent" style="flex:1; min-width:0; background:#030712; border:1px solid #4b5563; border-radius:6px; color:#d1d5db; font-size:13px; padding:7px 10px;">
+                    </div>
+                    <div class="input-row">
+                        <input type="text" id="torrent-magnet" placeholder="magnet:?xt=urn:btih:...">
+                    </div>
+                    <button class="btn btn-primary" id="torrent-add-btn" onclick="addTorrent()">Añadir torrent</button>
+                    <div id="torrent-add-progress" style="display:none; margin-top:8px;">
+                        <div style="height:8px; background:#1f2937; border-radius:4px; overflow:hidden;">
+                            <div id="torrent-add-bar" style="height:100%; width:0%; background:#22c55e; transition:width 0.2s;"></div>
+                        </div>
+                        <div id="torrent-add-status" style="font-size:12px; color:#9ca3af; margin-top:4px;"></div>
+                    </div>
+                    <div style="font-size:12px; color:#6b7280; margin-top:6px;">
+                        Archivo <code>.torrent</code> o enlace magnet. Se reproduce mientras descarga
+                        (secuencial) y se guarda para reanudarlo al reiniciar.
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div>
@@ -364,6 +399,7 @@
                     <option value="iptv">IPTV</option>
                     <option value="xtream">Xtream</option>
                     <option value="file">Archivo local</option>
+                    <option value="torrent">Torrent</option>
                     <option value="presentation">Presentación</option>
                 </select>
                 <select id="source-group-filter" onchange="applyFilters()" style="background:#030712; border:1px solid #4b5563; border-radius:6px; color:#fff; font-size:13px; padding:6px 10px;">
@@ -537,6 +573,7 @@
                 buildQualityFilter();
                 renderPage();
                 renderYoutubeSources();
+                loadTorrentStatus();
             })
             .catch(function(err) {
                 showMsg('Error recargando fuentes: ' + err.message, true);
@@ -718,12 +755,19 @@
             var autoLabel = s.auto_enabled ? 'ON' : 'OFF';
             var emitEnabled = s.emit_enabled !== false;
             var group = sourceGroup(s);
-            var typeLabel = s.type === 'file' ? 'archivo' : s.type;
+            var typeLabel = s.type === 'file' ? 'archivo' : (s.type === 'torrent' ? 'torrent' : s.type);
+            var torrentMeta = '';
+            if (s.type === 'torrent') {
+                var sizeLabel = formatBytes(s.size_bytes);
+                torrentMeta = '<span class="torrent-meta pending" data-torrent-id="' + escapeHtml(s.id) + '">'
+                    + (s.size_bytes ? 'Preparando · ' + sizeLabel : 'Preparando…')
+                    + '</span>';
+            }
             html += '<tr data-source-type="' + escapeHtml(s.type || '') + '" data-source-id="' + escapeHtml(s.id) + '" data-source-name="' + escapeHtml((s.name || '').toLowerCase()) + '" data-source-group="' + escapeHtml(sourceGroup(s).toLowerCase()) + '" data-source-emit="' + (emitEnabled ? '1' : '0') + '" data-source-quality="' + (s.type === 'iptv' ? getSourceQuality(s) : '') + '">'
                 + '<td><span class="source-type ' + typeClass + '">' + escapeHtml(typeLabel) + '</span></td>'
                 + '<td data-label="Auto" style="text-align:center;"><span class="tag ' + autoClass + '" onclick="toggleAuto(\'' + s.id + '\')" style="cursor:pointer;">' + autoLabel + '</span></td>'
                 + '<td data-label="Visible" style="text-align:center;"><input type="checkbox" class="emit-check" ' + (emitEnabled ? 'checked' : '') + ' onchange="toggleEmit(\'' + s.id + '\', this.checked)"></td>'
-                + '<td data-label="Nombre"><span>' + escapeHtml(s.name) + '</span></td>'
+                + '<td data-label="Nombre"><span>' + escapeHtml(s.name) + '</span>' + torrentMeta + '</td>'
                 + '<td data-label="Grupo" style="font-size:12px; color:#9ca3af;">' + escapeHtml(group) + '</td>'
                 + '<td data-label="Acciones" style="text-align:center;">'
                 + '<button class="btn btn-danger btn-sm del-btn" onclick="deleteSource(\'' + s.id + '\')" title="Eliminar">🗑️</button>'
@@ -1262,6 +1306,118 @@
             .catch(function(err) { showMsg('Error: ' + err.message, true); });
     }
 
+    function formatBytes(bytes) {
+        var value = Number(bytes) || 0;
+        if (value <= 0) return '0 B';
+        var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        var index = Math.floor(Math.log(value) / Math.log(1024));
+        if (index >= units.length) index = units.length - 1;
+        var scaled = value / Math.pow(1024, index);
+        return (index === 0 ? Math.round(scaled) : scaled.toFixed(1)) + ' ' + units[index];
+    }
+
+    function addTorrent() {
+        var nameEl = document.getElementById('torrent-name');
+        var fileEl = document.getElementById('torrent-file');
+        var magnetEl = document.getElementById('torrent-magnet');
+        var file = fileEl && fileEl.files ? fileEl.files[0] : null;
+        var magnet = (magnetEl.value || '').trim();
+        if (!file && !magnet) {
+            showMsg('Selecciona un archivo .torrent o pega un enlace magnet', true);
+            return;
+        }
+        if (magnet && !/^magnet:\?/i.test(magnet)) {
+            showMsg('El enlace magnet no es válido', true);
+            return;
+        }
+        var button = document.getElementById('torrent-add-btn');
+        var progress = document.getElementById('torrent-add-progress');
+        var bar = document.getElementById('torrent-add-bar');
+        var status = document.getElementById('torrent-add-status');
+
+        button.disabled = true;
+        progress.style.display = '';
+        bar.style.width = '0%';
+        status.style.color = '#9ca3af';
+        status.textContent = magnet ? 'Enviando magnet…' : 'Subiendo ' + file.name + '…';
+
+        var form = new FormData();
+        form.append('name', (nameEl.value || '').trim());
+        if (magnet) form.append('magnet', magnet);
+        if (file) form.append('file', file);
+
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/sources/add_torrent');
+        xhr.upload.onprogress = function(ev) {
+            if (!ev.lengthComputable) return;
+            var pct = Math.round(ev.loaded / ev.total * 100);
+            bar.style.width = pct + '%';
+        };
+        xhr.onload = function() {
+            button.disabled = false;
+            var data = {};
+            try { data = JSON.parse(xhr.responseText || '{}'); } catch (e) {}
+            if (xhr.status >= 200 && xhr.status < 300 && data.ok) {
+                bar.style.width = '100%';
+                status.style.color = '#22c55e';
+                status.textContent = 'Añadido: ' + (data.name || 'torrent')
+                    + (data.metadata_ready ? ' (' + formatBytes(data.size_bytes) + ')' : ' · obteniendo metadatos…');
+                fileEl.value = '';
+                magnetEl.value = '';
+                nameEl.value = '';
+                showMsg('Torrent añadido a la lista de reproducción', false);
+                loadSourcesAndRender();
+                setTimeout(loadTorrentStatus, 1500);
+            } else {
+                status.style.color = '#fca5a5';
+                status.textContent = data.error || ('Error HTTP ' + xhr.status);
+                showMsg(data.error || 'Error al añadir el torrent', true);
+            }
+        };
+        xhr.onerror = function() {
+            button.disabled = false;
+            status.style.color = '#fca5a5';
+            status.textContent = 'Error de red al añadir el torrent';
+            showMsg('Error de red al añadir el torrent', true);
+        };
+        xhr.send(form);
+    }
+
+    function loadTorrentStatus() {
+        var nodes = document.querySelectorAll('[data-torrent-id]');
+        if (!nodes.length) return;
+        fetch('/api/torrents/status')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var byId = {};
+                (data.torrents || []).forEach(function(t) { byId[t.id] = t; });
+                nodes.forEach(function(node) {
+                    var t = byId[node.getAttribute('data-torrent-id')];
+                    if (!t) return;
+                    node.classList.remove('error', 'pending');
+                    if (t.error) {
+                        node.classList.add('error');
+                        node.textContent = t.error;
+                        return;
+                    }
+                    if (!t.metadata) {
+                        node.classList.add('pending');
+                        node.textContent = 'Obteniendo metadatos…';
+                        return;
+                    }
+                    var pct = Math.max(0, Math.min(100, Math.round((t.progress || 0) * 100)));
+                    if (pct >= 100) {
+                        node.textContent = 'Completo · ' + formatBytes(t.size_bytes || t.total);
+                        return;
+                    }
+                    var speed = formatBytes(t.download_rate || 0) + '/s';
+                    node.textContent = 'Descargando ' + pct + '% · ' + speed
+                        + ' · ' + (t.peers || 0) + ' peer(s)';
+                });
+            })
+            .catch(function() {});
+    }
+
     initPageSize();
     initCurrentPage();
     refreshProvidersUi();
@@ -1269,6 +1425,8 @@
     buildQualityFilter();
     renderPage();
     renderYoutubeSources();
+    loadTorrentStatus();
+    setInterval(loadTorrentStatus, 4000);
 </script>
 
 <div class="epg-modal-bg" id="epg-modal-bg" onclick="if(event.target===this) closeIptvChannels()">
